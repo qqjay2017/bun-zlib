@@ -1,0 +1,16 @@
+{
+  "name": "\t",
+  "module": "index.ts",
+  "type": "module",
+  "scripts": {
+    "start": "bun run index.ts",
+    "dev": "bun --watch index.ts",
+    "chrome": "\"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome\" --remote-debugging-port=9222 --user-data-dir=\"$PWD/browser-profile\" https://www.69shuba.com/book/58851.htm"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
