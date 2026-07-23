@@ -7,6 +7,9 @@
     "dev": "bun --hot index.ts"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5",
+    "@tanstack/react-query-devtools": "^5",
+    "@tanstack/react-router": "^1",
     "react": "^19",
     "react-dom": "^19"
   },
