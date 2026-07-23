@@ -1,5 +1,13 @@
 import { useState } from "react";
+import { createRoute } from "@tanstack/react-router";
 import { useMutation } from "@tanstack/react-query";
+import { rootRoute } from "./__root";
+
+export const novelRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/novel",
+  component: NovelPage,
+});
 
 const BOOK_SOURCES = [
   { id: "69shuba", name: "69书吧", domain: "https://www.69shuba.com" },
@@ -11,7 +19,7 @@ interface FetchBookResult {
   error?: string;
 }
 
-export function NovelPage() {
+function NovelPage() {
   const [selectedSource, setSelectedSource] = useState(BOOK_SOURCES[0]!.id);
   const [url, setUrl] = useState("");
 

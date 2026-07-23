@@ -1,15 +1,9 @@
-import { createRouter, createRoute, createRootRoute, redirect } from "@tanstack/react-router";
-import { RootLayout } from "../routes/__root";
-import { NovelPage } from "../routes/novel";
-import { ComicPage } from "../routes/comic";
+import { createRouter, createRoute, redirect } from "@tanstack/react-router";
+import { rootRoute } from "../routes/__root";
+import { novelRoute } from "../routes/novel";
+import { comicRoute } from "../routes/comic";
 import { NotFound } from "../components/not-found";
 import { queryClient } from "./query";
-
-// 根路由
-const rootRoute = createRootRoute({
-  component: RootLayout,
-  notFoundComponent: NotFound,
-});
 
 // 首页重定向到 /novel
 const indexRoute = createRoute({
@@ -18,20 +12,6 @@ const indexRoute = createRoute({
   beforeLoad: () => {
     throw redirect({ to: "/novel" });
   },
-});
-
-// 小说路由
-const novelRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/novel",
-  component: NovelPage,
-});
-
-// 漫画路由
-const comicRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/comic",
-  component: ComicPage,
 });
 
 // 路由树
