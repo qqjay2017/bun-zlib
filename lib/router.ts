@@ -3,8 +3,18 @@ import { rootRoute } from "../routes/__root";
 import { novelRoute } from "../routes/novel";
 import { comicRoute } from "../routes/comic";
 import { downloadRoute } from "../routes/download";
+import { novelDetailRoute } from "../routes/novel-detail";
+import { novelReaderRoute } from "../routes/novel-reader";
+import { comicDetailRoute } from "../routes/comic-detail";
+import { comicReaderRoute } from "../routes/comic-reader";
 import { NotFound } from "../components/not-found";
 import { queryClient } from "./query";
+
+// 注册子路由
+novelRoute.addChildren([novelDetailRoute]);
+novelDetailRoute.addChildren([novelReaderRoute]);
+comicRoute.addChildren([comicDetailRoute]);
+comicDetailRoute.addChildren([comicReaderRoute]);
 
 // 首页重定向到 /novel
 const indexRoute = createRoute({
