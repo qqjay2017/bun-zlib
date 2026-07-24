@@ -25,13 +25,24 @@ async function getChromeBackend() {
   };
 }
 
-export async function fetchBookPageHtml(url: string): Promise<string> {
-  const view = new Bun.WebView({
+let sharedBookView: Promise<Bun.WebView> | null = null;
+let bookViewQueue: Promise<void> = Promise.resolve();
+
+async function createBookView(): Promise<Bun.WebView> {
+  return new Bun.WebView({
     dataStore: { directory: "./browser-profile" },
     backend: await getChromeBackend(),
   });
+}
 
-  try {
+function getSharedBookView(): Promise<Bun.WebView> {
+  sharedBookView ??= createBookView();
+  return sharedBookView;
+}
+
+export async function fetchBookPageHtml(url: string): Promise<string> {
+  const task = bookViewQueue.then(async () => {
+    const view = await getSharedBookView();
     await view.navigate(url);
     let html = await view.evaluate<string>("document.documentElement.outerHTML");
 
@@ -42,9 +53,14 @@ export async function fetchBookPageHtml(url: string): Promise<string> {
     }
 
     return html;
-  } finally {
-    view.close();
-  }
+  });
+
+  bookViewQueue = task.then(
+    () => {},
+    () => {},
+  );
+
+  return task;
 }
 
 function isChallengePage(html: string): boolean {

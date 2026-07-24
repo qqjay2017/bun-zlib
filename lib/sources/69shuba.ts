@@ -1,6 +1,7 @@
 import { registerSource } from '../source-config';
 import type { BookSourceConfig } from '../source-config';
 import type { BookMetadata } from '../cache-types';
+import { normalizeChapterOrder } from '../chapter-order';
 
 function text(value: string | null | undefined): string {
   return (value ?? '').replace(/\s+/g, ' ').trim();
@@ -112,24 +113,23 @@ const source69shuba: BookSourceConfig = {
       const anchors = [...doc.querySelectorAll('#catalog ul a, .catalog ul a, ul.catalog a')];
       const seen = new Set<string>();
 
-      return anchors
+      const chapters = anchors
         .map((anchor, fallbackIndex) => {
           const href = anchor.getAttribute('href') ?? '';
           const chapterDetailUrl = absoluteUrl(href, doc.baseURI || source69shuba.domain);
           const idMatch = chapterDetailUrl.match(/\/txt\/\d+\/(\d+)(?:[/?#].*)?$/) || chapterDetailUrl.match(/\/(\d+)\.htm(?:[?#].*)?$/);
           const chapterId = idMatch?.[1] ?? `chapter-${fallbackIndex + 1}`;
           const chapterName = stripChapterPrefix(anchor.textContent ?? '');
-          const dataNum = Number(anchor.closest('li')?.getAttribute('data-num') ?? fallbackIndex + 1);
 
-          return { chapterId, chapterName, chapterDetailUrl, chapterIndex: Number.isFinite(dataNum) ? dataNum - 1 : fallbackIndex };
+          return { chapterId, chapterName, chapterDetailUrl, chapterIndex: fallbackIndex };
         })
         .filter((chapter) => {
           if (!chapter.chapterName || seen.has(chapter.chapterDetailUrl)) return false;
           seen.add(chapter.chapterDetailUrl);
           return true;
-        })
-        .sort((a, b) => a.chapterIndex - b.chapterIndex)
-        .map((chapter, chapterIndex) => ({ ...chapter, chapterIndex }));
+        });
+
+      return normalizeChapterOrder(chapters);
     },
     extractContent(html: string) {
       if (!html || isCfChallenge(html)) return null;

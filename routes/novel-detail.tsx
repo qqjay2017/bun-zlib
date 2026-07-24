@@ -2,6 +2,7 @@ import { createRoute, Link, Outlet, useMatches } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { novelRoute } from "./novel";
 import { source69shuba } from "../lib/sources/69shuba";
+import { normalizeChapterOrder } from "../lib/chapter-order";
 import type { BookMetadata, ChapterMetadata } from "../lib/cache-types";
 
 export const novelDetailRoute = createRoute({
@@ -93,7 +94,7 @@ async function getChapters(
 ): Promise<ChapterMetadata[]> {
   const cacheUrl = `/api/cache/novel/${sourceId}/${bookId}/chapter-list`;
   const cached = await readCache<{ chapters: ChapterMetadata[] }>(cacheUrl);
-  if (cached?.chapters.length) return cached.chapters;
+  if (cached?.chapters.length) return normalizeChapterOrder(cached.chapters);
 
   const tocUrl = source69shuba.getTocUrl?.(detailUrl, bookId) ?? detailUrl;
   const html = await fetchHtml(tocUrl);
@@ -102,7 +103,7 @@ async function getChapters(
 
   await writeCache(cacheUrl, chapters);
   const now = Date.now();
-  return chapters.map((chapter) => ({ ...chapter, cachedAt: now }));
+  return normalizeChapterOrder(chapters).map((chapter) => ({ ...chapter, cachedAt: now }));
 }
 
 function NovelDetailLayout() {

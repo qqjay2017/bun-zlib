@@ -1,4 +1,4 @@
-import { createRoute } from "@tanstack/react-router";
+import { createRoute, Outlet, useMatches } from "@tanstack/react-router";
 import { rootRoute } from "./__root";
 
 export const comicRoute = createRoute({
@@ -8,9 +8,17 @@ export const comicRoute = createRoute({
 });
 
 function ComicPage() {
+  const matches = useMatches();
+  const showDefault = matches.length === 2;
+
   return (
-    <div className="page comic-page">
-      <p className="placeholder-text">漫画功能即将开放，敬请期待...</p>
-    </div>
+    <>
+      {showDefault && (
+        <div className="page comic-page">
+          <p className="placeholder-text">漫画功能即将开放，敬请期待...</p>
+        </div>
+      )}
+      <Outlet />
+    </>
   );
 }

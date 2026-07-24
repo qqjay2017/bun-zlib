@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { mkdir, readdir, rm } from 'node:fs/promises';
 import type { ContentType, BookMetadata, ChapterMetadata, ChapterListCache } from './cache-types';
+import { normalizeChapterOrder } from './chapter-order';
 
 // ============================================================
 // 路径工具
@@ -77,7 +78,7 @@ export async function saveChapterList(
   const dir = getChaptersCacheDir(contentType, sourceId, bookId);
   await mkdir(dir, { recursive: true });
   const now = Date.now();
-  const stamped: ChapterMetadata[] = chapters.map((ch) => ({ ...ch, cachedAt: now }));
+  const stamped: ChapterMetadata[] = normalizeChapterOrder(chapters).map((ch) => ({ ...ch, cachedAt: now }));
   const data: ChapterListCache = { chapters: stamped, updatedAt: now };
   await Bun.write(path.join(dir, 'index.json'), JSON.stringify(data, null, 2));
 }
@@ -95,7 +96,8 @@ export async function loadChapterList(
     const filePath = path.join(getChaptersCacheDir(contentType, sourceId, bookId), 'index.json');
     const file = Bun.file(filePath);
     const text = await file.text();
-    return JSON.parse(text) as ChapterListCache;
+    const data = JSON.parse(text) as ChapterListCache;
+    return { ...data, chapters: normalizeChapterOrder(data.chapters) };
   } catch {
     return null;
   }

@@ -2,6 +2,7 @@ import { createRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { novelDetailRoute } from "./novel-detail";
 import { source69shuba } from "../lib/sources/69shuba";
+import { normalizeChapterOrder } from "../lib/chapter-order";
 import type { ChapterMetadata } from "../lib/cache-types";
 
 export const novelReaderRoute = createRoute({
@@ -52,7 +53,7 @@ async function getChapterList(sourceId: string, bookId: string): Promise<Chapter
     `/api/cache/novel/${sourceId}/${bookId}/chapter-list`,
   );
   if (!cached?.chapters.length) throw new Error("目录缓存不存在，请先打开详情页");
-  return cached.chapters;
+  return normalizeChapterOrder(cached.chapters);
 }
 
 async function getChapter(

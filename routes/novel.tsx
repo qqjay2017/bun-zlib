@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { createRoute, useNavigate } from "@tanstack/react-router";
+import { createRoute, Outlet, useMatches, useNavigate } from "@tanstack/react-router";
 import { rootRoute } from "./__root";
 import { source69shuba } from "../lib/sources/69shuba";
 
@@ -14,6 +14,18 @@ const BOOK_SOURCES = [
 ];
 
 function NovelPage() {
+  const matches = useMatches();
+  const showDefault = matches.length === 2;
+
+  return (
+    <>
+      {showDefault && <NovelSearchPage />}
+      <Outlet />
+    </>
+  );
+}
+
+function NovelSearchPage() {
   const [selectedSource, setSelectedSource] = useState(BOOK_SOURCES[0]!.id);
   const [url, setUrl] = useState("");
   const [error, setError] = useState("");
