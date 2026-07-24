@@ -30,6 +30,8 @@ export interface BookSourceConfig {
   contentType: ContentType;
   /** 从URL中提取书籍ID（纯正则，在后端执行） */
   getBookId(url: string): string | null;
+  /** 从详情页 URL 推导目录页 URL */
+  getTocUrl?(url: string, bookId: string): string;
   /** DOM 提取器（在 WebView 中执行） */
   extractors: SourceExtractors;
 }

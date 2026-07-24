@@ -1,5 +1,8 @@
 import { createRoute, Link, Outlet, useMatches } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { novelRoute } from "./novel";
+import { source69shuba } from "../lib/sources/69shuba";
+import type { BookMetadata, ChapterMetadata } from "../lib/cache-types";
 
 export const novelDetailRoute = createRoute({
   getParentRoute: () => novelRoute,
@@ -7,61 +10,103 @@ export const novelDetailRoute = createRoute({
   component: NovelDetailLayout,
 });
 
-const MOCK_BOOK = {
-  bookId: "58851",
-  sourceId: "69shuba",
-  contentType: "novel" as const,
-  name: "斗破苍穹",
-  author: "天蚕土豆",
-  coverImageUrl: "https://placehold.co/200x280/1890ff/fff?text=斗破苍穹",
-  description:
-    "这里是斗气的世界，没有花俏艳丽的魔法，有的，仅仅是繁衍到巅峰的斗气！萧炎，主人公，萧家历史上空前绝后的斗气修炼天才。4岁就开始修炼斗之气，10岁拥有了九段斗之气，11岁突破了十段斗之气，一跃成为百年来斗之气修炼速度最快的人。然而就在12岁那年，他变成了废人，整整三年时间，家族冷遇，旁人轻视，被未婚妻退婚……种种打击接踵而来。就在他即将绝望的时候，一缕幽魂从他手上的戒指里浮现，一扇全新的大门在面前开启！",
+type ApiResult<T> = {
+  success: boolean;
+  data?: T;
+  error?: string;
 };
 
-const MOCK_CHAPTERS = Array.from({ length: 30 }, (_, i) => ({
-  chapterId: `chapter-${i + 1}`,
-  chapterName: `第${i + 1}章 ${
-    [
-      "陨落的天才",
-      "斗之气三段",
-      "成人仪式",
-      "纳兰嫣然",
-      "聚气散",
-      "炼药师",
-      "休夫",
-      "神秘老者",
-      "药老",
-      "焚诀",
-      "吞噬进化",
-      "紫云翼",
-      "沙漠之行",
-      "青莲地心火",
-      "异火榜",
-      "加玛帝国",
-      "炼药大会",
-      "三年之约",
-      "云岚宗",
-      "佛怒火莲",
-      "中州",
-      "丹塔",
-      "远古八族",
-      "魂殿",
-      "天府联盟",
-      "净莲妖火",
-      "双帝之战",
-      "大结局",
-      "番外一",
-      "番外二",
-    ][i] ?? `未知章节`
-  }`,
-  chapterIndex: i,
-  chapterDetailUrl: `#chapter-${i + 1}`,
-  cachedAt: Date.now(),
-}));
+type ChapterItem = Omit<ChapterMetadata, "cachedAt">;
+
+function getDetailUrl(bookId: string): string {
+  return `${source69shuba.domain}/book/${bookId}.htm`;
+}
+
+function assertRealPage(html: string): void {
+  if (/Just a moment|请稍候|正在进行安全验证|cf-turnstile|challenges\.cloudflare\.com/i.test(html)) {
+    throw new Error("当前仍是人机验证页，请先在 WebView/浏览器中通过 69 书吧验证");
+  }
+}
+
+async function fetchHtml(url: string): Promise<string> {
+  const res = await fetch("/api/fetch-book", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+  const result = (await res.json()) as ApiResult<string>;
+  if (!result.success || !result.data) throw new Error(result.error || "页面获取失败");
+  assertRealPage(result.data);
+  return result.data;
+}
+
+async function readCache<T>(url: string): Promise<T | null> {
+  const res = await fetch(url);
+  const result = (await res.json()) as ApiResult<T | null>;
+  if (!result.success) throw new Error(result.error || "缓存读取失败");
+  return result.data ?? null;
+}
+
+async function writeCache(url: string, data: unknown): Promise<void> {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  const result = (await res.json()) as ApiResult<unknown>;
+  if (!result.success) throw new Error(result.error || "缓存写入失败");
+}
+
+function parseHtml(html: string, url: string): Document {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const base = doc.createElement("base");
+  base.href = url;
+  doc.head.prepend(base);
+  return doc;
+}
+
+async function getBook(sourceId: string, bookId: string): Promise<BookMetadata> {
+  const cacheUrl = `/api/cache/novel/${sourceId}/${bookId}/metadata`;
+  const cached = await readCache<BookMetadata>(cacheUrl);
+  if (cached) return cached;
+
+  const detailUrl = getDetailUrl(bookId);
+  const html = await fetchHtml(detailUrl);
+  const parsed = source69shuba.extractors.getBookMetadata(parseHtml(html, detailUrl));
+  if (!parsed) throw new Error("详情页解析失败");
+
+  const book: Omit<BookMetadata, "cachedAt"> = {
+    ...parsed,
+    bookId,
+    sourceId,
+    contentType: "novel",
+    detailPageUrl: parsed.detailPageUrl || detailUrl,
+  };
+  await writeCache(cacheUrl, book);
+  return { ...book, cachedAt: Date.now() };
+}
+
+async function getChapters(
+  sourceId: string,
+  bookId: string,
+  detailUrl: string,
+): Promise<ChapterMetadata[]> {
+  const cacheUrl = `/api/cache/novel/${sourceId}/${bookId}/chapter-list`;
+  const cached = await readCache<{ chapters: ChapterMetadata[] }>(cacheUrl);
+  if (cached?.chapters.length) return cached.chapters;
+
+  const tocUrl = source69shuba.getTocUrl?.(detailUrl, bookId) ?? detailUrl;
+  const html = await fetchHtml(tocUrl);
+  const chapters: ChapterItem[] = source69shuba.extractors.getChapterList(parseHtml(html, tocUrl));
+  if (!chapters.length) throw new Error("目录页解析失败");
+
+  await writeCache(cacheUrl, chapters);
+  const now = Date.now();
+  return chapters.map((chapter) => ({ ...chapter, cachedAt: now }));
+}
 
 function NovelDetailLayout() {
   const matches = useMatches();
-  // 当没有子路由匹配时显示默认详情页内容
   const showDefault = matches.length === 3;
 
   return (
@@ -74,59 +119,117 @@ function NovelDetailLayout() {
 
 function NovelDetailContent() {
   const { sourceId, bookId } = novelDetailRoute.useParams();
-  const book = MOCK_BOOK;
-  const chapters = MOCK_CHAPTERS;
+  const queryClient = useQueryClient();
+
+  const bookQuery = useQuery({
+    queryKey: ["novel", sourceId, bookId, "metadata"],
+    queryFn: () => getBook(sourceId, bookId),
+    staleTime: 60_000,
+  });
+
+  const chapterQuery = useQuery({
+    queryKey: ["novel", sourceId, bookId, "chapters"],
+    queryFn: () => getChapters(sourceId, bookId, bookQuery.data!.detailPageUrl),
+    enabled: !!bookQuery.data,
+    staleTime: 60_000,
+  });
+
+  const downloadMutation = useMutation({
+    mutationFn: async (chapters: ChapterMetadata[]) => {
+      const res = await fetch("/api/download/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceId,
+          bookId,
+          contentType: "novel",
+          chapters: chapters.map(({ cachedAt, content, chapterIndex, ...chapter }) => chapter),
+        }),
+      });
+      const result = (await res.json()) as ApiResult<unknown>;
+      if (!result.success) throw new Error(result.error || "创建下载任务失败");
+      await queryClient.invalidateQueries({ queryKey: ["download", "tasks"] });
+    },
+  });
+
+  const book = bookQuery.data;
+  const chapters = chapterQuery.data ?? [];
+  const firstChapter = chapters[0];
+  const error = bookQuery.error || chapterQuery.error || downloadMutation.error;
 
   return (
     <div className="page detail-page">
       <div className="detail-header">
         <Link to="/novel" className="back-btn">
-          ← 返回
+          返回
         </Link>
       </div>
 
-      <div className="book-info">
-        <div className="book-cover">
-          <img src={book.coverImageUrl} alt={book.name} />
-        </div>
-        <div className="book-meta">
-          <h1 className="book-title">{book.name}</h1>
-          <p className="book-author">作者：{book.author}</p>
-          <p className="book-source">
-            来源：{sourceId} / ID：{bookId}
-          </p>
-          <p className="book-desc">{book.description}</p>
-          <div className="book-actions">
-            <button className="btn-primary">缓存全部</button>
-            <Link
-              to={'/novel/$sourceId/$bookId/$chapterId' as any}
-              params={{ sourceId, bookId, chapterId: 'chapter-1' } as any}
-              className="btn-secondary"
-            >
-              开始阅读
-            </Link>
-          </div>
-        </div>
-      </div>
+      {bookQuery.isPending && <div className="empty-state">详情加载中...</div>}
+      {error instanceof Error && <div className="error-message">{error.message}</div>}
 
-      <div className="chapter-section">
-        <h2 className="section-title">
-          章节列表
-          <span className="chapter-count">（共{chapters.length}章）</span>
-        </h2>
-        <div className="chapter-list">
-          {chapters.map((ch) => (
-            <Link
-              key={ch.chapterId}
-              to={'/novel/$sourceId/$bookId/$chapterId' as any}
-              params={{ sourceId, bookId, chapterId: ch.chapterId } as any}
-              className="chapter-item"
-            >
-              {ch.chapterName}
-            </Link>
-          ))}
-        </div>
-      </div>
+      {book && (
+        <>
+          <div className="book-info">
+            <div className="book-cover">
+              <img src={book.coverImageUrl || "https://placehold.co/200x280?text=No+Cover"} alt={book.name} />
+            </div>
+            <div className="book-meta">
+              <h1 className="book-title">{book.name}</h1>
+              <p className="book-author">作者：{book.author}</p>
+              <p className="book-source">
+                来源：{sourceId} / ID：{bookId}
+              </p>
+              <p className="book-desc">{book.description}</p>
+              <div className="book-actions">
+                <button
+                  className="btn-primary"
+                  disabled={!chapters.length || downloadMutation.isPending}
+                  onClick={() => downloadMutation.mutate(chapters)}
+                >
+                  {downloadMutation.isPending ? "任务创建中..." : "缓存全部章节"}
+                </button>
+                <a
+                  className={`btn-secondary${chapters.length ? "" : " disabled"}`}
+                  href={chapters.length ? `/api/download/epub/novel/${sourceId}/${bookId}` : undefined}
+                >
+                  下载 EPUB
+                </a>
+                {firstChapter && (
+                  <Link
+                    to={"/novel/$sourceId/$bookId/$chapterId" as any}
+                    params={{ sourceId, bookId, chapterId: firstChapter.chapterId } as any}
+                    className="btn-secondary"
+                  >
+                    开始阅读
+                  </Link>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="chapter-section">
+            <h2 className="section-title">
+              章节列表
+              <span className="chapter-count">
+                {chapterQuery.isPending ? "（加载中）" : `（共${chapters.length}章）`}
+              </span>
+            </h2>
+            <div className="chapter-list">
+              {chapters.map((ch) => (
+                <Link
+                  key={ch.chapterId}
+                  to={"/novel/$sourceId/$bookId/$chapterId" as any}
+                  params={{ sourceId, bookId, chapterId: ch.chapterId } as any}
+                  className="chapter-item"
+                >
+                  {ch.chapterName}
+                </Link>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

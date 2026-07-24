@@ -1,6 +1,13 @@
 import { defineController } from "../lib/controller";
-import { loadBookMetadata, loadChapterList, loadChapter } from "../lib/cache-manager";
-import type { ContentType } from "../lib/cache-types";
+import {
+  loadBookMetadata,
+  loadChapterList,
+  loadChapter,
+  saveBookMetadata,
+  saveChapterList,
+  saveChapter,
+} from "../lib/cache-manager";
+import type { BookMetadata, ChapterMetadata, ContentType } from "../lib/cache-types";
 
 defineController("/api/cache", {
   // 读取书籍元数据
@@ -22,6 +29,30 @@ defineController("/api/cache", {
     const { type, sourceId, bookId, chapterId } = params;
     const data = await loadChapter(type as ContentType, sourceId!, bookId!, chapterId!);
     return Response.json({ success: true, data });
+  },
+
+  // 写入书籍元数据
+  "POST /:type/:sourceId/:bookId/metadata": async (req, params) => {
+    const { type, sourceId, bookId } = params;
+    const body = (await req.json()) as Omit<BookMetadata, "cachedAt">;
+    await saveBookMetadata(type as ContentType, sourceId!, bookId!, body);
+    return Response.json({ success: true });
+  },
+
+  // 写入章节列表
+  "POST /:type/:sourceId/:bookId/chapter-list": async (req, params) => {
+    const { type, sourceId, bookId } = params;
+    const body = (await req.json()) as Omit<ChapterMetadata, "cachedAt">[];
+    await saveChapterList(type as ContentType, sourceId!, bookId!, body);
+    return Response.json({ success: true });
+  },
+
+  // 写入章节内容
+  "POST /:type/:sourceId/:bookId/chapter/:chapterId": async (req, params) => {
+    const { type, sourceId, bookId } = params;
+    const body = (await req.json()) as Omit<ChapterMetadata, "cachedAt">;
+    await saveChapter(type as ContentType, sourceId!, bookId!, body);
+    return Response.json({ success: true });
   },
 
   // 封面图片代理

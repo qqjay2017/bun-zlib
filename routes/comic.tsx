@@ -3,7 +3,7 @@ import { rootRoute } from "./__root";
 
 export const comicRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: "/comic",
+  path: "comic",
   component: ComicPage,
 });
 

@@ -33,11 +33,22 @@ export async function fetchBookPageHtml(url: string): Promise<string> {
 
   try {
     await view.navigate(url);
-    const html = await view.evaluate("document.documentElement.outerHTML");
-    return html as string;
+    let html = await view.evaluate<string>("document.documentElement.outerHTML");
+
+    const deadline = Date.now() + 30_000;
+    while (isChallengePage(html) && Date.now() < deadline) {
+      await Bun.sleep(1_000);
+      html = await view.evaluate<string>("document.documentElement.outerHTML");
+    }
+
+    return html;
   } finally {
     view.close();
   }
+}
+
+function isChallengePage(html: string): boolean {
+  return /Just a moment|请稍候|正在进行安全验证|cf-turnstile|challenges\.cloudflare\.com/i.test(html);
 }
 
 /**

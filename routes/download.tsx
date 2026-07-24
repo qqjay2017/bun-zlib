@@ -4,7 +4,7 @@ import { rootRoute } from "./__root";
 
 export const downloadRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: "/download",
+  path: "download",
   component: DownloadCenter,
 });
 

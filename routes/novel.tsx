@@ -1,11 +1,11 @@
 import { useState } from "react";
-import { createRoute } from "@tanstack/react-router";
-import { useMutation } from "@tanstack/react-query";
+import { createRoute, useNavigate } from "@tanstack/react-router";
 import { rootRoute } from "./__root";
+import { source69shuba } from "../lib/sources/69shuba";
 
 export const novelRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: "/novel",
+  path: "novel",
   component: NovelPage,
 });
 
@@ -13,32 +13,29 @@ const BOOK_SOURCES = [
   { id: "69shuba", name: "69书吧", domain: "https://www.69shuba.com" },
 ];
 
-interface FetchBookResult {
-  success: boolean;
-  data?: string;
-  error?: string;
-}
-
 function NovelPage() {
   const [selectedSource, setSelectedSource] = useState(BOOK_SOURCES[0]!.id);
   const [url, setUrl] = useState("");
+  const [error, setError] = useState("");
+  const navigate = useNavigate();
 
   const currentSource = BOOK_SOURCES.find((s) => s.id === selectedSource)!;
 
-  const mutation = useMutation({
-    mutationFn: async (bookUrl: string): Promise<FetchBookResult> => {
-      const res = await fetch("/api/fetch-book", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: bookUrl }),
-      });
-      return res.json() as Promise<FetchBookResult>;
-    },
-  });
-
   const handleFetch = () => {
-    if (!url.trim()) return;
-    mutation.mutate(url.trim());
+    const bookUrl = url.trim();
+    if (!bookUrl) return;
+
+    const bookId = source69shuba.getBookId(bookUrl);
+    if (!bookId) {
+      setError("无法从 URL 识别书籍 ID");
+      return;
+    }
+
+    setError("");
+    navigate({
+      to: "/novel/$sourceId/$bookId" as any,
+      params: { sourceId: selectedSource, bookId } as any,
+    });
   };
 
   return (
@@ -68,30 +65,13 @@ function NovelPage() {
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           placeholder="请输入书籍详情页地址，如 https://www.69shuba.com/book/58851.htm"
-          disabled={mutation.isPending}
         />
-        <button onClick={handleFetch} disabled={mutation.isPending || !url.trim()}>
-          {mutation.isPending ? "加载中..." : "跳转"}
+        <button onClick={handleFetch} disabled={!url.trim()}>
+          跳转
         </button>
       </div>
 
-      {mutation.isError && (
-        <div className="error-message">
-          {mutation.error instanceof Error ? mutation.error.message : "网络错误"}
-        </div>
-      )}
-
-      {mutation.isSuccess && !mutation.data.success && (
-        <div className="error-message">
-          {mutation.data.error || "请求失败"}
-        </div>
-      )}
-
-      {mutation.isSuccess && mutation.data.success && mutation.data.data && (
-        <div className="result-area">
-          <pre><code>{mutation.data.data}</code></pre>
-        </div>
-      )}
+      {error && <div className="error-message">{error}</div>}
     </div>
   );
 }

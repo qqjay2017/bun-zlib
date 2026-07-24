@@ -11,12 +11,20 @@ import "./controllers/source.controller";
 import "./lib/sources";
 
 const router = createRouter();
+const port = Number(process.env.PORT ?? 3000);
 
 Bun.serve({
-  port: 3000,
-  routes: { "/": index },
+  port,
+  routes: {
+    "/": index,
+    "/novel": index,
+    "/novel/*": index,
+    "/comic": index,
+    "/comic/*": index,
+    "/download": index,
+  },
   fetch: router,
   development: { hmr: true, console: true },
 });
 
-console.log("Server running at http://localhost:3000");
+console.log(`Server running at http://localhost:${port}`);

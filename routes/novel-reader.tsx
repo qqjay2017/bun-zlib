@@ -1,5 +1,8 @@
 import { createRoute, Link } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { novelDetailRoute } from "./novel-detail";
+import { source69shuba } from "../lib/sources/69shuba";
+import type { ChapterMetadata } from "../lib/cache-types";
 
 export const novelReaderRoute = createRoute({
   getParentRoute: () => novelDetailRoute,
@@ -7,122 +10,154 @@ export const novelReaderRoute = createRoute({
   component: NovelReaderPage,
 });
 
-const MOCK_CHAPTERS = Array.from({ length: 30 }, (_, i) => ({
-  chapterId: `chapter-${i + 1}`,
-  chapterName: `第${i + 1}章 ${
-    [
-      "陨落的天才",
-      "斗之气三段",
-      "成人仪式",
-      "纳兰嫣然",
-      "聚气散",
-      "炼药师",
-      "休夫",
-      "神秘老者",
-      "药老",
-      "焚诀",
-      "吞噬进化",
-      "紫云翼",
-      "沙漠之行",
-      "青莲地心火",
-      "异火榜",
-      "加玛帝国",
-      "炼药大会",
-      "三年之约",
-      "云岚宗",
-      "佛怒火莲",
-      "中州",
-      "丹塔",
-      "远古八族",
-      "魂殿",
-      "天府联盟",
-      "净莲妖火",
-      "双帝之战",
-      "大结局",
-      "番外一",
-      "番外二",
-    ][i] ?? `未知章节`
-  }`,
-  chapterIndex: i,
-}));
+type ApiResult<T> = {
+  success: boolean;
+  data?: T;
+  error?: string;
+};
 
-const MOCK_CONTENT = `  萧炎站在悬崖边缘，俯瞰着脚下翻涌的云海。晨风拂过他的衣袂，猎猎作响。他的目光穿透层层云雾，落在远处那座巍峨的山峰之上。
+async function readCache<T>(url: string): Promise<T | null> {
+  const res = await fetch(url);
+  const result = (await res.json()) as ApiResult<T | null>;
+  if (!result.success) throw new Error(result.error || "缓存读取失败");
+  return result.data ?? null;
+}
 
-  "药老，你真的确定异火就在那座山里？"萧炎低声问道，语气中带着一丝期待与紧张。
+async function writeCache(url: string, data: unknown): Promise<void> {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  const result = (await res.json()) as ApiResult<unknown>;
+  if (!result.success) throw new Error(result.error || "缓存写入失败");
+}
 
-  戒指中传来药老苍老而沉稳的声音："小子，老夫什么时候骗过你？那里的确有异火的痕迹，不过，能不能得到就看你的造化了。"
+async function fetchHtml(url: string): Promise<string> {
+  const res = await fetch("/api/fetch-book", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+  const result = (await res.json()) as ApiResult<string>;
+  if (!result.success || !result.data) throw new Error(result.error || "章节页获取失败");
+  if (/Just a moment|请稍候|正在进行安全验证|cf-turnstile|challenges\.cloudflare\.com/i.test(result.data)) {
+    throw new Error("当前仍是人机验证页，请先在 WebView/浏览器中通过 69 书吧验证");
+  }
+  return result.data;
+}
 
-  萧炎深吸一口气，将体内斗气运转至巅峰状态。他知道，这一次的机会来之不易。异火，那是天地间最为狂暴也最为珍贵的火焰，每一位炼药师都梦寐以求的至宝。
+async function getChapterList(sourceId: string, bookId: string): Promise<ChapterMetadata[]> {
+  const cached = await readCache<{ chapters: ChapterMetadata[] }>(
+    `/api/cache/novel/${sourceId}/${bookId}/chapter-list`,
+  );
+  if (!cached?.chapters.length) throw new Error("目录缓存不存在，请先打开详情页");
+  return cached.chapters;
+}
 
-  他纵身跃下悬崖，斗气在脚下凝聚成一双淡蓝色的翅膀——紫云翼。这是他历经千辛万苦才得到的飞行斗技，此刻正好派上用场。
+async function getChapter(
+  sourceId: string,
+  bookId: string,
+  chapter: ChapterMetadata,
+): Promise<ChapterMetadata> {
+  const cacheUrl = `/api/cache/novel/${sourceId}/${bookId}/chapter/${chapter.chapterId}`;
+  const cached = await readCache<ChapterMetadata>(cacheUrl);
+  if (cached?.content) return cached;
 
-  紫云翼振动，带着萧炎向那座山峰飞去。云海在他身下翻滚，偶尔有几只巨大的飞鸟从旁边掠过，用好奇的目光打量着这个不速之客。
+  const html = await fetchHtml(chapter.chapterDetailUrl);
+  const extracted = source69shuba.extractors.extractContent(html);
+  if (!extracted?.content) throw new Error("章节正文解析失败");
 
-  飞行了大约半个时辰，萧炎终于来到了那座山峰的近前。从远处看，这座山峰并不算特别高大，但走近了才发现，它通体赤红，仿佛被烈火焚烧过一般，空气中弥漫着一股灼热的气息。
-
-  "这是……火属性斗气凝聚成实质？"萧炎震惊地看着眼前的景象。他修炼斗气这么多年，还是第一次见到如此浓郁的火属性斗气。
-
-  药老的声音再次响起："这里的火属性斗气确实异常浓郁，看来异火在此地沉睡了很长时间。小子，小心行事，异火周围往往有强大的守护兽。"
-
-  萧炎点点头，小心翼翼地降落在山脚下。他环顾四周，发现山壁上有一个天然形成的洞穴，洞口隐约透出暗红色的光芒。
-
-  "就是那里了。"萧炎深吸一口气，迈步向洞穴走去。每走一步，周围的温度就升高一分，到了洞口时，空气已经热得让人难以呼吸。
-
-  他运起斗气护体，走进洞穴。洞内曲折幽深，两侧的岩壁上布满了暗红色的晶体，散发着幽幽的光芒。这些晶体都是上等的火属性矿石，价值连城，但萧炎此刻无暇顾及，他的全部注意力都放在了前方。
-
-  走了约莫一刻钟，洞穴豁然开朗，一个巨大的地下空间出现在眼前。空间的正中央，一团拳头大小的青色火焰静静地悬浮在半空中，火焰周围环绕着无数细小的火蛇，看起来既美丽又危险。
-
-  "青莲地心火！"药老激动地叫道，"果然是异火榜上排名第十九的青莲地心火！小子，快，用焚诀吞噬它！"
-
-  萧炎眼中闪过一抹坚定之色。他知道，吞噬异火是一件极其危险的事情，稍有不慎就会被异火反噬，轻则重伤，重则灰飞烟灭。但他已经没有退路了。
-
-  三年之约即将到来，他必须变得更强。为了这一天，他付出了太多的努力和汗水。
-
-  "来吧！"萧炎大喝一声，双手结印，体内的焚诀功法开始运转。一股强大的吸力从他体内涌出，向那团青色火焰笼罩而去。
-
-  青莲地心火似乎感受到了威胁，火焰猛地暴涨，整个地下空间都被青色的火光所充斥。滚烫的热浪向四面八方扩散，岩壁上的晶体纷纷碎裂，发出噼里啪啦的声响。
-
-  萧炎咬紧牙关，强忍着体内传来的剧痛，继续催动焚诀。他知道，这是一场意志的较量，谁先坚持不住，谁就会输掉一切。`;
+  const nextChapter = {
+    ...chapter,
+    chapterName: extracted.chapterName || chapter.chapterName,
+    content: extracted.content,
+  };
+  await writeCache(cacheUrl, nextChapter);
+  return { ...nextChapter, cachedAt: Date.now() };
+}
 
 function NovelReaderPage() {
   const { sourceId, bookId, chapterId } = novelReaderRoute.useParams();
+  const queryClient = useQueryClient();
 
-  const currentIndex = MOCK_CHAPTERS.findIndex((c) => c.chapterId === chapterId);
-  const chapter = MOCK_CHAPTERS[currentIndex] ?? MOCK_CHAPTERS[0]!;
+  const chapterListQuery = useQuery({
+    queryKey: ["novel", sourceId, bookId, "chapters"],
+    queryFn: () => getChapterList(sourceId, bookId),
+    staleTime: 60_000,
+  });
 
+  const chapters = chapterListQuery.data ?? [];
+  const currentIndex = chapters.findIndex((c) => c.chapterId === chapterId);
+  const chapterMeta = currentIndex >= 0 ? chapters[currentIndex] : undefined;
+
+  const chapterQuery = useQuery({
+    queryKey: ["novel", sourceId, bookId, "chapter", chapterId],
+    queryFn: () => getChapter(sourceId, bookId, chapterMeta!),
+    enabled: !!chapterMeta,
+    staleTime: 60_000,
+  });
+
+  const refreshMutation = useMutation({
+    mutationFn: async () => {
+      if (!chapterMeta) return;
+      await queryClient.invalidateQueries({
+        queryKey: ["novel", sourceId, bookId, "chapter", chapterMeta.chapterId],
+      });
+    },
+  });
+
+  const chapter = chapterQuery.data;
   const hasPrev = currentIndex > 0;
-  const hasNext = currentIndex < MOCK_CHAPTERS.length - 1;
+  const hasNext = currentIndex >= 0 && currentIndex < chapters.length - 1;
+  const error = chapterListQuery.error || chapterQuery.error || refreshMutation.error;
 
   return (
     <div className="page reader-page">
       <div className="reader-header">
         <Link
-          to={'/novel/$sourceId/$bookId' as any}
+          to={"/novel/$sourceId/$bookId" as any}
           params={{ sourceId, bookId } as any}
           className="back-btn"
         >
-          ← 返回目录
+          返回目录
         </Link>
-        <span className="chapter-title-header">{chapter.chapterName}</span>
+        <span className="chapter-title-header">
+          {chapter?.chapterName || chapterMeta?.chapterName || "章节加载中..."}
+        </span>
+        <button
+          className="btn-secondary reader-cache-btn"
+          disabled={!chapterMeta || refreshMutation.isPending}
+          onClick={() => refreshMutation.mutate()}
+        >
+          重新缓存
+        </button>
       </div>
 
-      <article className="reader-content">
-        <h2 className="reader-chapter-title">{chapter.chapterName}</h2>
-        <div className="reader-text">
-          {MOCK_CONTENT.split("\n\n").map((paragraph, idx) => (
-            <p key={idx}>{paragraph.trim()}</p>
-          ))}
-        </div>
-      </article>
+      {error instanceof Error && <div className="error-message">{error.message}</div>}
+      {(chapterListQuery.isPending || chapterQuery.isPending) && (
+        <div className="empty-state">章节加载中...</div>
+      )}
+
+      {chapter && (
+        <article className="reader-content">
+          <h2 className="reader-chapter-title">{chapter.chapterName}</h2>
+          <div className="reader-text">
+            {(chapter.content || "").split(/\n{2,}/).map((paragraph, idx) => (
+              <p key={idx}>{paragraph.trim()}</p>
+            ))}
+          </div>
+        </article>
+      )}
 
       <div className="reader-nav">
         {hasPrev ? (
           <Link
-            to={'/novel/$sourceId/$bookId/$chapterId' as any}
+            to={"/novel/$sourceId/$bookId/$chapterId" as any}
             params={{
               sourceId,
               bookId,
-              chapterId: MOCK_CHAPTERS[currentIndex - 1]!.chapterId,
+              chapterId: chapters[currentIndex - 1]!.chapterId,
             } as any}
             className="btn-nav"
           >
@@ -132,7 +167,7 @@ function NovelReaderPage() {
           <span className="btn-nav disabled">上一章</span>
         )}
         <Link
-          to={'/novel/$sourceId/$bookId' as any}
+          to={"/novel/$sourceId/$bookId" as any}
           params={{ sourceId, bookId } as any}
           className="btn-nav btn-catalog"
         >
@@ -140,11 +175,11 @@ function NovelReaderPage() {
         </Link>
         {hasNext ? (
           <Link
-            to={'/novel/$sourceId/$bookId/$chapterId' as any}
+            to={"/novel/$sourceId/$bookId/$chapterId" as any}
             params={{
               sourceId,
               bookId,
-              chapterId: MOCK_CHAPTERS[currentIndex + 1]!.chapterId,
+              chapterId: chapters[currentIndex + 1]!.chapterId,
             } as any}
             className="btn-nav"
           >
