@@ -32,6 +32,13 @@ function RootLayout() {
         >
           下载
         </Link>
+        <Link
+          to="/bookshelf"
+          className="tab-btn"
+          activeProps={{ className: "tab-btn active" }}
+        >
+          书架
+        </Link>
       </div>
       <Outlet />
       {import.meta.env.DEV && <TanStackRouterDevtools />}

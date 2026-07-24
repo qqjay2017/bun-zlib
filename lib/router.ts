@@ -3,6 +3,7 @@ import { rootRoute } from "../routes/__root";
 import { novelRoute } from "../routes/novel";
 import { comicRoute } from "../routes/comic";
 import { downloadRoute } from "../routes/download";
+import { bookshelfRoute } from "../routes/bookshelf";
 import { novelDetailRoute } from "../routes/novel-detail";
 import { novelReaderRoute } from "../routes/novel-reader";
 import { comicDetailRoute } from "../routes/comic-detail";
@@ -26,7 +27,7 @@ const indexRoute = createRoute({
 });
 
 // 路由树
-const routeTree = rootRoute.addChildren([indexRoute, novelRoute, comicRoute, downloadRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, novelRoute, comicRoute, downloadRoute, bookshelfRoute]);
 
 // 创建 router 实例
 export const router = createRouter({

@@ -27,6 +27,16 @@ async function getChromeBackend() {
 
 let sharedBookView: Promise<Bun.WebView> | null = null;
 let bookViewQueue: Promise<void> = Promise.resolve();
+let lastBookViewNavigationAt = 0;
+
+const MIN_BOOK_VIEW_NAVIGATION_INTERVAL_MS = 300;
+const MAX_BOOK_VIEW_NAVIGATION_INTERVAL_MS = 2_000;
+const FETCH_HTML_TTL_MS = 30_000;
+const htmlFetchCache = new Map<string, {
+  fetchedAt: number;
+  html?: string;
+  promise?: Promise<string>;
+}>();
 
 async function createBookView(): Promise<Bun.WebView> {
   return new Bun.WebView({
@@ -40,27 +50,61 @@ function getSharedBookView(): Promise<Bun.WebView> {
   return sharedBookView;
 }
 
+function getRandomNavigationInterval(): number {
+  return Math.floor(
+    MIN_BOOK_VIEW_NAVIGATION_INTERVAL_MS
+    + Math.random() * (MAX_BOOK_VIEW_NAVIGATION_INTERVAL_MS - MIN_BOOK_VIEW_NAVIGATION_INTERVAL_MS + 1),
+  );
+}
+
 export async function fetchBookPageHtml(url: string): Promise<string> {
+  const cached = htmlFetchCache.get(url);
+  if (cached?.promise) return cached.promise;
+  if (cached?.html && Date.now() - cached.fetchedAt < FETCH_HTML_TTL_MS) {
+    return cached.html;
+  }
+
   const task = bookViewQueue.then(async () => {
-    const view = await getSharedBookView();
-    await view.navigate(url);
-    let html = await view.evaluate<string>("document.documentElement.outerHTML");
+    try {
+      const view = await getSharedBookView();
+      const waitMs = Math.max(
+        0,
+        getRandomNavigationInterval() - (Date.now() - lastBookViewNavigationAt),
+      );
+      if (waitMs > 0) await Bun.sleep(waitMs);
+      lastBookViewNavigationAt = Date.now();
 
-    const deadline = Date.now() + 30_000;
-    while (isChallengePage(html) && Date.now() < deadline) {
-      await Bun.sleep(1_000);
-      html = await view.evaluate<string>("document.documentElement.outerHTML");
+      await view.navigate(url);
+      let html = await view.evaluate<string>("document.documentElement.outerHTML");
+
+      const deadline = Date.now() + 30_000;
+      while (isChallengePage(html) && Date.now() < deadline) {
+        await Bun.sleep(1_000);
+        html = await view.evaluate<string>("document.documentElement.outerHTML");
+      }
+
+      return html;
+    } catch (error) {
+      sharedBookView = null;
+      throw error;
     }
-
-    return html;
   });
+
+  htmlFetchCache.set(url, { fetchedAt: Date.now(), promise: task });
 
   bookViewQueue = task.then(
     () => {},
     () => {},
   );
 
-  return task;
+  try {
+    const html = await task;
+    htmlFetchCache.set(url, { fetchedAt: Date.now(), html });
+    return html;
+  } catch (error) {
+    htmlFetchCache.delete(url);
+    throw error;
+  }
 }
 
 function isChallengePage(html: string): boolean {

@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { createRoute, Link, Outlet, useMatches } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { novelRoute } from "./novel";
@@ -18,6 +19,21 @@ type ApiResult<T> = {
 };
 
 type ChapterItem = Omit<ChapterMetadata, "cachedAt">;
+type ShelfBook = Pick<
+  BookMetadata,
+  | "bookId"
+  | "sourceId"
+  | "contentType"
+  | "name"
+  | "author"
+  | "coverImageUrl"
+  | "description"
+  | "detailPageUrl"
+> & {
+  addedAt: number;
+};
+
+const NOVEL_SHELF_KEY = "bookshelf:novel";
 
 function getDetailUrl(bookId: string): string {
   return `${source69shuba.domain}/book/${bookId}.htm`;
@@ -71,6 +87,11 @@ async function getBook(sourceId: string, bookId: string): Promise<BookMetadata> 
   const cached = await readCache<BookMetadata>(cacheUrl);
   if (cached) return cached;
 
+  return fetchBookFromSource(sourceId, bookId);
+}
+
+async function fetchBookFromSource(sourceId: string, bookId: string): Promise<BookMetadata> {
+  const cacheUrl = `/api/cache/novel/${sourceId}/${bookId}/metadata`;
   const detailUrl = getDetailUrl(bookId);
   const html = await fetchHtml(detailUrl);
   const parsed = source69shuba.extractors.getBookMetadata(parseHtml(html, detailUrl));
@@ -87,6 +108,22 @@ async function getBook(sourceId: string, bookId: string): Promise<BookMetadata> 
   return { ...book, cachedAt: Date.now() };
 }
 
+async function fetchChaptersFromSource(
+  sourceId: string,
+  bookId: string,
+  detailUrl: string,
+): Promise<ChapterMetadata[]> {
+  const cacheUrl = `/api/cache/novel/${sourceId}/${bookId}/chapter-list`;
+  const tocUrl = source69shuba.getTocUrl?.(detailUrl, bookId) ?? detailUrl;
+  const html = await fetchHtml(tocUrl);
+  const chapters: ChapterItem[] = source69shuba.extractors.getChapterList(parseHtml(html, tocUrl));
+  if (!chapters.length) throw new Error("目录页解析失败");
+
+  await writeCache(cacheUrl, chapters);
+  const now = Date.now();
+  return normalizeChapterOrder(chapters).map((chapter) => ({ ...chapter, cachedAt: now }));
+}
+
 async function getChapters(
   sourceId: string,
   bookId: string,
@@ -96,14 +133,40 @@ async function getChapters(
   const cached = await readCache<{ chapters: ChapterMetadata[] }>(cacheUrl);
   if (cached?.chapters.length) return normalizeChapterOrder(cached.chapters);
 
-  const tocUrl = source69shuba.getTocUrl?.(detailUrl, bookId) ?? detailUrl;
-  const html = await fetchHtml(tocUrl);
-  const chapters: ChapterItem[] = source69shuba.extractors.getChapterList(parseHtml(html, tocUrl));
-  if (!chapters.length) throw new Error("目录页解析失败");
+  return fetchChaptersFromSource(sourceId, bookId, detailUrl);
+}
 
-  await writeCache(cacheUrl, chapters);
-  const now = Date.now();
-  return normalizeChapterOrder(chapters).map((chapter) => ({ ...chapter, cachedAt: now }));
+function readShelfBooks(): ShelfBook[] {
+  try {
+    const raw = localStorage.getItem(NOVEL_SHELF_KEY);
+    return raw ? JSON.parse(raw) as ShelfBook[] : [];
+  } catch {
+    return [];
+  }
+}
+
+function isBookInShelf(sourceId: string, bookId: string): boolean {
+  return readShelfBooks().some((book) => book.sourceId === sourceId && book.bookId === bookId);
+}
+
+function addBookToShelf(book: BookMetadata): void {
+  const books = readShelfBooks();
+  const nextBook: ShelfBook = {
+    bookId: book.bookId,
+    sourceId: book.sourceId,
+    contentType: book.contentType,
+    name: book.name,
+    author: book.author,
+    coverImageUrl: book.coverImageUrl,
+    description: book.description,
+    detailPageUrl: book.detailPageUrl,
+    addedAt: Date.now(),
+  };
+  const nextBooks = [
+    nextBook,
+    ...books.filter((item) => item.sourceId !== book.sourceId || item.bookId !== book.bookId),
+  ];
+  localStorage.setItem(NOVEL_SHELF_KEY, JSON.stringify(nextBooks));
 }
 
 function NovelDetailLayout() {
@@ -121,6 +184,7 @@ function NovelDetailLayout() {
 function NovelDetailContent() {
   const { sourceId, bookId } = novelDetailRoute.useParams();
   const queryClient = useQueryClient();
+  const [inShelf, setInShelf] = useState(false);
 
   const bookQuery = useQuery({
     queryKey: ["novel", sourceId, bookId, "metadata"],
@@ -133,6 +197,31 @@ function NovelDetailContent() {
     queryFn: () => getChapters(sourceId, bookId, bookQuery.data!.detailPageUrl),
     enabled: !!bookQuery.data,
     staleTime: 60_000,
+  });
+
+  useEffect(() => {
+    if (bookQuery.data) {
+      setInShelf(isBookInShelf(sourceId, bookId));
+    }
+  }, [bookId, bookQuery.data, sourceId]);
+
+  const refreshDetailMutation = useMutation({
+    mutationFn: () => fetchBookFromSource(sourceId, bookId),
+    onSuccess: (book) => {
+      queryClient.setQueryData(["novel", sourceId, bookId, "metadata"], book);
+      setInShelf(isBookInShelf(sourceId, bookId));
+    },
+  });
+
+  const refreshChaptersMutation = useMutation({
+    mutationFn: () => fetchChaptersFromSource(
+      sourceId,
+      bookId,
+      bookQuery.data?.detailPageUrl ?? getDetailUrl(bookId),
+    ),
+    onSuccess: (chapters) => {
+      queryClient.setQueryData(["novel", sourceId, bookId, "chapters"], chapters);
+    },
   });
 
   const downloadMutation = useMutation({
@@ -156,7 +245,17 @@ function NovelDetailContent() {
   const book = bookQuery.data;
   const chapters = chapterQuery.data ?? [];
   const firstChapter = chapters[0];
-  const error = bookQuery.error || chapterQuery.error || downloadMutation.error;
+  const error = bookQuery.error
+    || chapterQuery.error
+    || refreshDetailMutation.error
+    || refreshChaptersMutation.error
+    || downloadMutation.error;
+
+  const handleAddShelf = () => {
+    if (!book) return;
+    addBookToShelf(book);
+    setInShelf(true);
+  };
 
   return (
     <div className="page detail-page">
@@ -183,6 +282,27 @@ function NovelDetailContent() {
               </p>
               <p className="book-desc">{book.description}</p>
               <div className="book-actions">
+                <button
+                  className="btn-secondary"
+                  disabled={inShelf}
+                  onClick={handleAddShelf}
+                >
+                  {inShelf ? "已在书架" : "添加书架"}
+                </button>
+                <button
+                  className="btn-secondary"
+                  disabled={refreshDetailMutation.isPending}
+                  onClick={() => refreshDetailMutation.mutate()}
+                >
+                  {refreshDetailMutation.isPending ? "刷新中..." : "刷新详情"}
+                </button>
+                <button
+                  className="btn-secondary"
+                  disabled={refreshChaptersMutation.isPending}
+                  onClick={() => refreshChaptersMutation.mutate()}
+                >
+                  {refreshChaptersMutation.isPending ? "刷新中..." : "刷新目录"}
+                </button>
                 <button
                   className="btn-primary"
                   disabled={!chapters.length || downloadMutation.isPending}

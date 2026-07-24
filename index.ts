@@ -22,6 +22,7 @@ Bun.serve({
     "/comic": index,
     "/comic/*": index,
     "/download": index,
+    "/bookshelf": index,
   },
   fetch: router,
   development: { hmr: true, console: true },

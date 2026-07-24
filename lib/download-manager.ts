@@ -16,9 +16,19 @@ import { getSourceById } from './source-config';
 // 常量
 // ============================================================
 
-const MAX_CONCURRENCY = 4;
-const CHAPTER_DELAY_MS = 200;
-const CHAPTER_TIMEOUT_MS = 30_000;
+const MAX_CONCURRENCY = 1;
+const CHAPTER_DELAY_MS = 2_000;
+
+class CloudflareChallengeError extends Error {
+  constructor() {
+    super('触发 Cloudflare 校验，已停止缓存任务。请先在 Chrome/WebView 中通过验证后再继续。');
+    this.name = 'CloudflareChallengeError';
+  }
+}
+
+function isChallengePage(html: string): boolean {
+  return /Just a moment|请稍候|正在进行安全验证|cf-turnstile|challenges\.cloudflare\.com/i.test(html);
+}
 
 function getTasksFilePath(): string {
   return path.join(getCacheRoot(), 'downloads', 'tasks.json');
@@ -165,7 +175,10 @@ class DownloadManager {
       // === Executor 流程：fetchPageHtml → extractContent → saveChapter ===
 
       // 1. 获取 HTML
-      const html = await this.fetchWithTimeout(chapter.chapterDetailUrl, CHAPTER_TIMEOUT_MS);
+      const html = await this.fetchChapterHtml(chapter.chapterDetailUrl);
+      if (isChallengePage(html)) {
+        throw new CloudflareChallengeError();
+      }
 
       // 2. 通过 executor 提取正文内容
       const sourceConfig = getSourceById(task.sourceId);
@@ -198,6 +211,10 @@ class DownloadManager {
     } catch (err) {
       chapter.status = 'failed';
       task.progress.failed++;
+      if (err instanceof CloudflareChallengeError) {
+        task.status = 'failed';
+        task.error = err.message;
+      }
       console.error(`[DownloadManager] 章节下载失败: ${chapter.chapterName}`, err);
     }
 
@@ -246,13 +263,8 @@ class DownloadManager {
     task.updatedAt = Date.now();
   }
 
-  private async fetchWithTimeout(url: string, timeoutMs: number): Promise<string> {
-    return Promise.race([
-      fetchPageHtml(url),
-      new Promise<string>((_, reject) =>
-        setTimeout(() => reject(new Error(`下载超时: ${url}`)), timeoutMs),
-      ),
-    ]);
+  private async fetchChapterHtml(url: string): Promise<string> {
+    return fetchPageHtml(url);
   }
 
   private notifyListeners(task: DownloadTask): void {
@@ -287,21 +299,16 @@ class DownloadManager {
       const tasks: DownloadTask[] = JSON.parse(json);
 
       for (const task of tasks) {
-        // 将未完成任务重置为 pending 重新开始
-        if (task.status === 'downloading') {
-          task.status = 'pending';
+        if (task.status === 'downloading' || task.status === 'pending') {
+          task.status = 'cancelled';
+          task.error = '服务重启后已停止未完成的缓存任务，请手动重新开始。';
           for (const ch of task.chapters) {
-            if (ch.status === 'downloading') {
-              ch.status = 'pending';
+            if (ch.status === 'downloading' || ch.status === 'pending') {
+              ch.status = 'failed';
             }
           }
         }
         this.tasks.set(task.taskId, task);
-      }
-
-      // 恢复后自动开始处理 pending 任务
-      if (this.tasks.size > 0) {
-        setTimeout(() => this.processNext(), 0);
       }
     } catch {
       // 文件不存在或解析失败，忽略
