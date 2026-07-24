@@ -23,6 +23,10 @@ const source69shuba: BookSourceConfig = {
       // TODO: 待确认页面选择器后实现
       return [];
     },
+    extractContent(html: string) {
+      // TODO: 待确认页面选择器后实现
+      return null;
+    },
   },
 };
 

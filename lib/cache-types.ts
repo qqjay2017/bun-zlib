@@ -21,6 +21,8 @@ export interface ChapterMetadata {
   chapterDetailUrl: string;
   chapterIndex: number;
   chapterName: string;
+  /** 章节正文内容（HTML 或纯文本，取决于 extractor） */
+  content?: string;
   cachedAt: number;
 }
 

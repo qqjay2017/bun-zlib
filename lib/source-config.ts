@@ -4,11 +4,18 @@ import type { ContentType, BookMetadata, ChapterMetadata } from './cache-types';
  * DOM 提取器函数集
  * 所有提取操作在 WebView 中执行，直接操作 Document 对象
  */
+export interface ExtractedContent {
+  content: string;
+  chapterName?: string;
+}
+
 export interface SourceExtractors {
   /** 从详情页 DOM 提取书籍完整元数据 */
   getBookMetadata(doc: Document): BookMetadata | null;
   /** 从详情页 DOM 提取章节列表 */
   getChapterList(doc: Document): Omit<ChapterMetadata, 'cachedAt'>[];
+  /** 从章节页 HTML 提取正文内容 */
+  extractContent(html: string): ExtractedContent | null;
 }
 
 /** 书源配置 */

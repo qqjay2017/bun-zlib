@@ -25,6 +25,13 @@ function RootLayout() {
         >
           漫画
         </Link>
+        <Link
+          to="/download"
+          className="tab-btn"
+          activeProps={{ className: "tab-btn active" }}
+        >
+          下载
+        </Link>
       </div>
       <Outlet />
       {import.meta.env.DEV && <TanStackRouterDevtools />}

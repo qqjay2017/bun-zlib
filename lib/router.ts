@@ -2,6 +2,7 @@ import { createRouter, createRoute, redirect } from "@tanstack/react-router";
 import { rootRoute } from "../routes/__root";
 import { novelRoute } from "../routes/novel";
 import { comicRoute } from "../routes/comic";
+import { downloadRoute } from "../routes/download";
 import { NotFound } from "../components/not-found";
 import { queryClient } from "./query";
 
@@ -15,7 +16,7 @@ const indexRoute = createRoute({
 });
 
 // 路由树
-const routeTree = rootRoute.addChildren([indexRoute, novelRoute, comicRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, novelRoute, comicRoute, downloadRoute]);
 
 // 创建 router 实例
 export const router = createRouter({

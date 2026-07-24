@@ -39,3 +39,11 @@ export async function fetchBookPageHtml(url: string): Promise<string> {
     view.close();
   }
 }
+
+/**
+ * 通过 WebView 获取页面完整 HTML（供下载管理器使用）
+ * 与 fetchBookPageHtml 相同，但命名更明确地表达下载场景
+ */
+export async function fetchPageHtml(url: string): Promise<string> {
+  return fetchBookPageHtml(url);
+}
