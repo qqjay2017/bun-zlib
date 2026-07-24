@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: shared_lib/core_utilities
+title: 核心工具库（路由、EPUB 构建、书源配置与查询客户端）
+scope:
+    - lib/epub-builder.ts
+    - lib/query.ts
+    - lib/source-config.ts
+    - lib/controller.ts
+source_files: []
+depends_on: []
+related_to: []

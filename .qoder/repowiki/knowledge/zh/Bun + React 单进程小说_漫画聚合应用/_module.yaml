@@ -1,0 +1,18 @@
+schema_version: 1
+module_path: ""
+title: Bun + React 单进程小说/漫画聚合应用
+scope:
+    - README.md
+    - CLAUDE.md
+    - .gitignore
+    - package.json
+    - tsconfig.json
+    - bun.lock
+    - index.css
+    - index.html
+    - backend.ts
+    - frontend.tsx
+    - index.ts
+source_files: []
+depends_on: []
+related_to: []

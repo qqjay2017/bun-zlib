@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: frontend/download_and_shared
+title: 下载中心与根路由
+scope:
+    - routes/download.tsx
+    - components/not-found.tsx
+    - routes/__root.tsx
+source_files: []
+depends_on: []
+related_to: []

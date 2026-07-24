@@ -1,0 +1,9 @@
+schema_version: 1
+module_path: backend_api
+title: 后端 API 控制器与前端路由注册
+scope:
+    - controllers/
+    - lib/router.ts
+source_files: []
+depends_on: []
+related_to: []

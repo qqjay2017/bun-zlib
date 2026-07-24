@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: shared_lib
+title: 共享库（lib）
+scope:
+    - lib/
+source_files: []
+depends_on: []
+related_to: []

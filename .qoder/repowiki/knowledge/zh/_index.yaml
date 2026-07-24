@@ -1,0 +1,83 @@
+# 知识卡导出索引文件
+schema_version: 1
+locale: zh-CN
+branch: main
+nodes_managed: true
+exported_at: "2026-07-24T03:45:58Z"
+modules:
+    "":
+        dir_name: Bun + React 单进程小说_漫画聚合应用
+        title: Bun + React 单进程小说/漫画聚合应用
+        scope:
+            - README.md
+            - CLAUDE.md
+            - .gitignore
+            - package.json
+            - tsconfig.json
+            - bun.lock
+            - index.css
+            - index.html
+            - backend.ts
+            - frontend.tsx
+            - index.ts
+        source_files: []
+        children:
+            - backend_api
+            - frontend
+            - shared_lib
+        depends_on: []
+        related_to: []
+    backend_api:
+        dir_name: 后端 API 控制器与前端路由注册
+        title: 后端 API 控制器与前端路由注册
+        scope:
+            - controllers/
+            - lib/router.ts
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    frontend:
+        dir_name: 前端路由与页面壳层
+        title: 前端路由与页面壳层
+        scope:
+            - routes/
+            - components/
+        source_files: []
+        children:
+            - frontend/download_and_shared
+        depends_on: []
+        related_to: []
+    frontend/download_and_shared:
+        dir_name: 下载中心与根路由
+        title: 下载中心与根路由
+        scope:
+            - routes/download.tsx
+            - components/not-found.tsx
+            - routes/__root.tsx
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    shared_lib:
+        dir_name: 共享库（lib）
+        title: 共享库（lib）
+        scope:
+            - lib/
+        source_files: []
+        children:
+            - shared_lib/core_utilities
+        depends_on: []
+        related_to: []
+    shared_lib/core_utilities:
+        dir_name: 核心工具库（路由、EPUB 构建、书源配置与查询客户端）
+        title: 核心工具库（路由、EPUB 构建、书源配置与查询客户端）
+        scope:
+            - lib/epub-builder.ts
+            - lib/query.ts
+            - lib/source-config.ts
+            - lib/controller.ts
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
