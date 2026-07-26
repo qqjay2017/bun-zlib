@@ -96,6 +96,15 @@ async function getCachedImageFilenames(sourceId: string, bookId: string, chapter
   return result.data ?? [];
 }
 
+async function cacheChapterImages(sourceId: string, bookId: string, chapterId: string): Promise<string[]> {
+  const res = await fetch(`/api/cache/comic/${sourceId}/${bookId}/chapter/${chapterId}/images/cache`, {
+    method: "POST",
+  });
+  const result = (await res.json()) as ApiResult<string[]>;
+  if (!result.success) throw new Error(result.error || "本章图片缓存失败");
+  return result.data ?? [];
+}
+
 const MANWAPI_AES_KEY = "0B6666A0-BB59-1381-B746-a0E4C9AC";
 
 function isImageBytes(view: Uint8Array): boolean {
@@ -224,6 +233,13 @@ function ComicReaderPage() {
     staleTime: 60_000,
   });
 
+  const cacheImagesMutation = useMutation({
+    mutationFn: () => cacheChapterImages(sourceId, bookId, chapterId),
+    onSuccess: (filenames) => {
+      queryClient.setQueryData(["comic", sourceId, bookId, "chapter", chapterId, "images"], filenames);
+    },
+  });
+
   const refreshMutation = useMutation({
     mutationFn: async () => {
       if (!chapterMeta) return;
@@ -243,7 +259,13 @@ function ComicReaderPage() {
   const shouldUseCachedImages = cachedImages.length > 0;
   const hasPrev = currentIndex > 0;
   const hasNext = currentIndex >= 0 && currentIndex < chapters.length - 1;
-  const error = chapterListQuery.error || chapterQuery.error || refreshMutation.error;
+  const error = chapterListQuery.error || chapterQuery.error || refreshMutation.error || cacheImagesMutation.error;
+
+  useEffect(() => {
+    if (chapter?.content && !cachedImages.length && !cacheImagesMutation.isPending && !cacheImagesMutation.error) {
+      cacheImagesMutation.mutate();
+    }
+  }, [cachedImages.length, cacheImagesMutation, chapter?.content]);
 
   return (
     <div className="page reader-page comic-reader-page-inner">

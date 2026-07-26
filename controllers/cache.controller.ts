@@ -10,6 +10,7 @@ import {
   listChapterImages,
 } from "../lib/cache-manager";
 import type { BookMetadata, ChapterMetadata, ContentType } from "../lib/cache-types";
+import { cacheComicChapterImages } from "../lib/comic-assets";
 
 defineController("/api/cache", {
   // 读取书籍元数据
@@ -60,6 +61,21 @@ defineController("/api/cache", {
   "GET /:type/:sourceId/:bookId/chapter/:chapterId/images": async (_req, params) => {
     const { type, sourceId, bookId, chapterId } = params;
     const files = await listChapterImages(type as ContentType, sourceId!, bookId!, chapterId!);
+    return Response.json({ success: true, data: files.map((file) => file.filename) });
+  },
+
+  "POST /:type/:sourceId/:bookId/chapter/:chapterId/images/cache": async (_req, params) => {
+    const { type, sourceId, bookId, chapterId } = params;
+    if (type !== "comic") {
+      return Response.json({ success: false, error: "Only comic images can be cached" }, { status: 400 });
+    }
+
+    const chapter = await loadChapter(type as ContentType, sourceId!, bookId!, chapterId!);
+    if (!chapter?.content) {
+      return Response.json({ success: false, error: "Chapter content not found" }, { status: 404 });
+    }
+
+    const files = await cacheComicChapterImages(sourceId!, bookId!, chapter);
     return Response.json({ success: true, data: files.map((file) => file.filename) });
   },
 
