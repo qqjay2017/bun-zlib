@@ -1,5 +1,8 @@
 import { createRoute, Link, Outlet, useMatches } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { comicRoute } from "./comic";
+import { sourceManwapi } from "../lib/sources/manwapi";
+import type { BookMetadata, ChapterMetadata } from "../lib/cache-types";
 
 export const comicDetailRoute = createRoute({
   getParentRoute: () => comicRoute,
@@ -7,55 +10,102 @@ export const comicDetailRoute = createRoute({
   component: ComicDetailLayout,
 });
 
-const MOCK_COMIC = {
-  bookId: "one-piece",
-  sourceId: "manhuagui",
-  contentType: "comic" as const,
-  name: "海贼王",
-  author: "尾田荣一郎",
-  coverImageUrl: "https://placehold.co/200x280/e74c3c/fff?text=海贼王",
-  description:
-    "拥有财富、名声、权力，拥有这世上一切的男人——海贼王哥尔·D·罗杰，在临死前留下了一句话，让全世界的人奔向大海：「想要我的财宝吗？想要的话可以全部给你，去找吧！我把所有财宝都放在那里。」从此，全世界的人们踏上了寻找海贼王宝藏的旅程，世界迎来了大海贼时代。而故事的主人公路飞，一个吃了橡胶果实的少年，也怀揣着成为海贼王的梦想，踏上了他的冒险旅程。",
+type ApiResult<T> = {
+  success: boolean;
+  data?: T;
+  error?: string;
 };
 
-const MOCK_CHAPTERS = Array.from({ length: 24 }, (_, i) => ({
-  chapterId: `ep-${i + 1}`,
-  chapterName: `第${i + 1}话 ${
-    [
-      "冒险的黎明",
-      "草帽小子登场",
-      "索隆的约定",
-      "航海士娜美",
-      "厨师山治",
-      "乌索普的谎言",
-      "乔巴的奇迹",
-      "罗宾的眼泪",
-      "弗兰奇的梦想",
-      "布鲁克的音乐",
-      "阿拉巴斯坦篇",
-      "空岛篇",
-      "水之都篇",
-      "司法岛篇",
-      "恐怖三角帆篇",
-      "香波地群岛篇",
-      "推进城篇",
-      "顶上战争篇",
-      "两年后重聚",
-      "鱼人岛篇",
-      "德雷斯罗萨篇",
-      "蛋糕岛篇",
-      "和之国篇",
-      "最终章",
-    ][i] ?? `未知话`
-  }`,
-  chapterIndex: i,
-  chapterDetailUrl: `#ep-${i + 1}`,
-  cachedAt: Date.now(),
-}));
+type ChapterItem = Omit<ChapterMetadata, "cachedAt">;
+
+function getDetailUrl(bookId: string): string {
+  return `${sourceManwapi.domain}/comic/${bookId}`;
+}
+
+async function fetchHtml(url: string): Promise<string> {
+  const res = await fetch("/api/fetch-book", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+  const result = (await res.json()) as ApiResult<string>;
+  if (!result.success || !result.data) throw new Error(result.error || "页面获取失败");
+  if (/Just a moment|请稍候|正在进行安全验证|cf-turnstile|challenges\.cloudflare\.com/i.test(result.data)) {
+    throw new Error("当前仍是人机验证页，请先在 WebView/浏览器中通过漫蛙验证");
+  }
+  return result.data;
+}
+
+async function readCache<T>(url: string): Promise<T | null> {
+  const res = await fetch(url);
+  const result = (await res.json()) as ApiResult<T | null>;
+  if (!result.success) throw new Error(result.error || "缓存读取失败");
+  return result.data ?? null;
+}
+
+async function writeCache(url: string, data: unknown): Promise<void> {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  const result = (await res.json()) as ApiResult<unknown>;
+  if (!result.success) throw new Error(result.error || "缓存写入失败");
+}
+
+function parseHtml(html: string, url: string): Document {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const base = doc.createElement("base");
+  base.href = url;
+  doc.head.prepend(base);
+  return doc;
+}
+
+async function getComic(sourceId: string, bookId: string): Promise<BookMetadata> {
+  const cacheUrl = `/api/cache/comic/${sourceId}/${bookId}/metadata`;
+  const cached = await readCache<BookMetadata>(cacheUrl);
+  if (cached) return cached;
+  return fetchComicFromSource(sourceId, bookId);
+}
+
+async function fetchComicFromSource(sourceId: string, bookId: string): Promise<BookMetadata> {
+  const cacheUrl = `/api/cache/comic/${sourceId}/${bookId}/metadata`;
+  const detailUrl = getDetailUrl(bookId);
+  const html = await fetchHtml(detailUrl);
+  const parsed = sourceManwapi.extractors.getBookMetadata(parseHtml(html, detailUrl));
+  if (!parsed) throw new Error("漫画详情页解析失败");
+
+  const comic: Omit<BookMetadata, "cachedAt"> = {
+    ...parsed,
+    bookId,
+    sourceId,
+    contentType: "comic",
+    detailPageUrl: parsed.detailPageUrl || detailUrl,
+  };
+  await writeCache(cacheUrl, comic);
+  return { ...comic, cachedAt: Date.now() };
+}
+
+async function fetchChaptersFromSource(sourceId: string, bookId: string, detailUrl: string): Promise<ChapterMetadata[]> {
+  const cacheUrl = `/api/cache/comic/${sourceId}/${bookId}/chapter-list`;
+  const html = await fetchHtml(detailUrl || getDetailUrl(bookId));
+  const chapters: ChapterItem[] = sourceManwapi.extractors.getChapterList(parseHtml(html, detailUrl || getDetailUrl(bookId)));
+  if (!chapters.length) throw new Error("漫画目录解析失败");
+
+  await writeCache(cacheUrl, chapters);
+  const now = Date.now();
+  return chapters.map((chapter) => ({ ...chapter, cachedAt: now }));
+}
+
+async function getChapters(sourceId: string, bookId: string, detailUrl: string): Promise<ChapterMetadata[]> {
+  const cacheUrl = `/api/cache/comic/${sourceId}/${bookId}/chapter-list`;
+  const cached = await readCache<{ chapters: ChapterMetadata[] }>(cacheUrl);
+  if (cached?.chapters.length) return cached.chapters;
+  return fetchChaptersFromSource(sourceId, bookId, detailUrl);
+}
 
 function ComicDetailLayout() {
   const matches = useMatches();
-  // 当没有子路由匹配时显示默认详情页内容
   const showDefault = matches.length === 3;
 
   return (
@@ -68,60 +118,119 @@ function ComicDetailLayout() {
 
 function ComicDetailContent() {
   const { sourceId, bookId } = comicDetailRoute.useParams();
-  const comic = MOCK_COMIC;
-  const chapters = MOCK_CHAPTERS;
+  const queryClient = useQueryClient();
+
+  const comicQuery = useQuery({
+    queryKey: ["comic", sourceId, bookId, "metadata"],
+    queryFn: () => getComic(sourceId, bookId),
+    staleTime: 60_000,
+  });
+
+  const chapterQuery = useQuery({
+    queryKey: ["comic", sourceId, bookId, "chapters"],
+    queryFn: () => getChapters(sourceId, bookId, comicQuery.data!.detailPageUrl),
+    enabled: !!comicQuery.data,
+    staleTime: 60_000,
+  });
+
+  const refreshDetailMutation = useMutation({
+    mutationFn: () => fetchComicFromSource(sourceId, bookId),
+    onSuccess: (comic) => {
+      queryClient.setQueryData(["comic", sourceId, bookId, "metadata"], comic);
+    },
+  });
+
+  const refreshChaptersMutation = useMutation({
+    mutationFn: () => fetchChaptersFromSource(
+      sourceId,
+      bookId,
+      comicQuery.data?.detailPageUrl ?? getDetailUrl(bookId),
+    ),
+    onSuccess: (chapters) => {
+      queryClient.setQueryData(["comic", sourceId, bookId, "chapters"], chapters);
+    },
+  });
+
+  const comic = comicQuery.data;
+  const chapters = chapterQuery.data ?? [];
+  const firstChapter = chapters[0];
+  const error = comicQuery.error || chapterQuery.error || refreshDetailMutation.error || refreshChaptersMutation.error;
 
   return (
     <div className="page detail-page">
       <div className="detail-header">
         <Link to="/comic" className="back-btn">
-          ← 返回
+          返回
         </Link>
       </div>
 
-      <div className="book-info">
-        <div className="book-cover">
-          <img src={comic.coverImageUrl} alt={comic.name} />
-        </div>
-        <div className="book-meta">
-          <h1 className="book-title">{comic.name}</h1>
-          <p className="book-author">作者：{comic.author}</p>
-          <p className="book-source">
-            来源：{sourceId} / ID：{bookId}
-          </p>
-          <p className="book-desc">{comic.description}</p>
-          <div className="book-actions">
-            <button className="btn-primary">缓存全部</button>
-            <Link
-              to={'/comic/$sourceId/$bookId/$chapterId' as any}
-              params={{ sourceId, bookId, chapterId: 'ep-1' } as any}
-              className="btn-secondary"
-            >
-              开始阅读
-            </Link>
-          </div>
-        </div>
-      </div>
+      {comicQuery.isPending && <div className="empty-state">详情加载中...</div>}
+      {error instanceof Error && <div className="error-message">{error.message}</div>}
 
-      <div className="chapter-section">
-        <h2 className="section-title">
-          章节列表
-          <span className="chapter-count">（共{chapters.length}话）</span>
-        </h2>
-        <div className="chapter-grid">
-          {chapters.map((ch) => (
-            <Link
-              key={ch.chapterId}
-              to={'/comic/$sourceId/$bookId/$chapterId' as any}
-              params={{ sourceId, bookId, chapterId: ch.chapterId } as any}
-              className="chapter-grid-item"
-            >
-              <span className="chapter-grid-num">第{ch.chapterIndex + 1}话</span>
-              <span className="chapter-grid-name">{ch.chapterName.replace(/^第\d+话\s*/, '')}</span>
-            </Link>
-          ))}
-        </div>
-      </div>
+      {comic && (
+        <>
+          <div className="book-info">
+            <div className="book-cover">
+              <img src={comic.coverImageUrl || "https://placehold.co/200x280?text=No+Cover"} alt={comic.name} />
+            </div>
+            <div className="book-meta">
+              <h1 className="book-title">{comic.name}</h1>
+              <p className="book-author">作者：{comic.author}</p>
+              <p className="book-source">
+                来源：{sourceId} / ID：{bookId}
+              </p>
+              <p className="book-desc">{comic.description}</p>
+              <div className="book-actions">
+                <button
+                  className="btn-secondary"
+                  disabled={refreshDetailMutation.isPending}
+                  onClick={() => refreshDetailMutation.mutate()}
+                >
+                  {refreshDetailMutation.isPending ? "刷新中..." : "刷新详情"}
+                </button>
+                <button
+                  className="btn-secondary"
+                  disabled={refreshChaptersMutation.isPending}
+                  onClick={() => refreshChaptersMutation.mutate()}
+                >
+                  {refreshChaptersMutation.isPending ? "刷新中..." : "刷新目录"}
+                </button>
+                {firstChapter && (
+                  <Link
+                    to={"/comic/$sourceId/$bookId/$chapterId" as any}
+                    params={{ sourceId, bookId, chapterId: firstChapter.chapterId } as any}
+                    className="btn-primary"
+                  >
+                    开始阅读
+                  </Link>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="chapter-section">
+            <h2 className="section-title">
+              章节列表
+              <span className="chapter-count">
+                {chapterQuery.isPending ? "（加载中）" : `（共${chapters.length}话）`}
+              </span>
+            </h2>
+            <div className="chapter-grid">
+              {chapters.map((chapter) => (
+                <Link
+                  key={chapter.chapterId}
+                  to={"/comic/$sourceId/$bookId/$chapterId" as any}
+                  params={{ sourceId, bookId, chapterId: chapter.chapterId } as any}
+                  className="chapter-grid-item"
+                >
+                  <span className="chapter-grid-num">第{chapter.chapterIndex + 1}话</span>
+                  <span className="chapter-grid-name">{chapter.chapterName}</span>
+                </Link>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

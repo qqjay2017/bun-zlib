@@ -107,6 +107,35 @@ export async function fetchBookPageHtml(url: string): Promise<string> {
   }
 }
 
+export async function fetchRemoteText(url: string): Promise<string> {
+  const res = await fetch(url, {
+    headers: {
+      "Accept": "application/json,text/plain,*/*",
+      "User-Agent": "Mozilla/5.0",
+      "Referer": new URL(url).origin,
+    },
+  });
+  if (!res.ok) {
+    throw new Error(`Remote request failed: ${res.status}`);
+  }
+  return res.text();
+}
+
+export async function fetchRemoteResponse(url: string): Promise<Response> {
+  const target = new URL(url);
+  const res = await fetch(target, {
+    headers: {
+      "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+      "User-Agent": "Mozilla/5.0",
+      "Referer": "https://manwapi.cc/",
+    },
+  });
+  if (!res.ok) {
+    throw new Error(`Remote request failed: ${res.status}`);
+  }
+  return res;
+}
+
 function isChallengePage(html: string): boolean {
   return /Just a moment|请稍候|正在进行安全验证|cf-turnstile|challenges\.cloudflare\.com/i.test(html);
 }

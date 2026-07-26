@@ -161,9 +161,6 @@ body {
 }
 
 .comic-page {
-  display: flex;
-  align-items: center;
-  justify-content: center;
   min-height: 200px;
 }
 
@@ -575,6 +572,18 @@ body {
   width: 100%;
   max-width: 800px;
   display: block;
+}
+
+.comic-strip-placeholder {
+  width: 100%;
+  max-width: 800px;
+  min-height: 320px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #999;
+  background: #f7f7f7;
+  border-bottom: 1px solid #e8e8e8;
 }
 
 /* 底部章节导航 */
