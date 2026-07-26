@@ -15,6 +15,7 @@ import { normalizeChapterOrder } from '../lib/chapter-order';
 import { getAllSources } from '../lib/source-config';
 import '../lib/sources'; // 注册所有书源，供 getAllSources() 使用
 import type { ContentType, BookMetadata, ChapterMetadata, ChapterListCache } from '../lib/cache-types';
+import { saveVisitHistory } from '../lib/history-manager';
 import type { VisitHistoryItem } from '../lib/history-manager';
 import type { DownloadTask } from '../lib/download-types';
 
@@ -174,27 +175,14 @@ async function migrateBook(
   }
 }
 
-async function migrateVisitHistory(db: ReturnType<typeof getDb>, summary: Summary): Promise<void> {
+async function migrateVisitHistory(summary: Summary): Promise<void> {
   const filePath = path.join(getCacheRoot(), 'visit-history.json');
   const items = await readJson<VisitHistoryItem[]>(filePath);
   if (!items) return;
 
-  const insert = db.query(`
-    INSERT INTO visit_history (type, source_id, book_id, book_name, chapter_id, chapter_name, path, visited_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
+  // 复用 history-manager 的去重/50 条上限逻辑，保证脚本可安全重复运行
   for (const item of items) {
-    insert.run(
-      item.type,
-      item.sourceId,
-      item.bookId,
-      item.bookName,
-      item.chapterId ?? null,
-      item.chapterName ?? null,
-      item.path,
-      item.visitedAt,
-    );
+    await saveVisitHistory(item);
     summary.historyItems++;
   }
 }
@@ -286,7 +274,7 @@ async function main(): Promise<void> {
     }
   }
 
-  await migrateVisitHistory(db, summary);
+  await migrateVisitHistory(summary);
   await migrateDownloadTasks(db, summary);
 
   console.log('迁移完成:');
