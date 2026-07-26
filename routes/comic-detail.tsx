@@ -315,11 +315,21 @@ function ComicDetailContent() {
             <div className="book-meta">
               <h1 className="book-title">{comic.name}</h1>
               <p className="book-author">作者：{comic.author}</p>
-              <p className="book-source">
-                来源：{sourceId} / ID：{bookId}
-              </p>
+              <div className="book-badges">
+                <span className="book-badge">来源：{sourceId}</span>
+                <span className="book-badge">ID：{bookId}</span>
+              </div>
               <p className="book-desc">{comic.description}</p>
               <div className="book-actions">
+                {firstChapter && (
+                  <Link
+                    to={"/comic/$sourceId/$bookId/$chapterId" as any}
+                    params={{ sourceId, bookId, chapterId: firstChapter.chapterId } as any}
+                    className="btn-cta"
+                  >
+                    开始阅读
+                  </Link>
+                )}
                 <button
                   className="btn-secondary"
                   disabled={inShelf}
@@ -355,15 +365,6 @@ function ComicDetailContent() {
                 >
                   {exportMutation.isPending ? "导出中..." : "导出 CBZ"}
                 </button>
-                {firstChapter && (
-                  <Link
-                    to={"/comic/$sourceId/$bookId/$chapterId" as any}
-                    params={{ sourceId, bookId, chapterId: firstChapter.chapterId } as any}
-                    className="btn-primary"
-                  >
-                    开始阅读
-                  </Link>
-                )}
               </div>
             </div>
           </div>

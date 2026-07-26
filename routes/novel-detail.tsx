@@ -205,6 +205,8 @@ function NovelDetailContent() {
     staleTime: 60_000,
   });
 
+  const book = bookQuery.data;
+
   useEffect(() => {
     if (bookQuery.data) {
       setInShelf(isBookInShelf(sourceId, bookId));
@@ -272,7 +274,6 @@ function NovelDetailContent() {
     },
   });
 
-  const book = bookQuery.data;
   const chapters = chapterQuery.data ?? [];
   const firstChapter = chapters[0];
   const error = bookQuery.error
@@ -308,11 +309,21 @@ function NovelDetailContent() {
             <div className="book-meta">
               <h1 className="book-title">{book.name}</h1>
               <p className="book-author">作者：{book.author}</p>
-              <p className="book-source">
-                来源：{sourceId} / ID：{bookId}
-              </p>
+              <div className="book-badges">
+                <span className="book-badge">来源：{sourceId}</span>
+                <span className="book-badge">ID：{bookId}</span>
+              </div>
               <p className="book-desc">{book.description}</p>
               <div className="book-actions">
+                {firstChapter && (
+                  <Link
+                    to={"/novel/$sourceId/$bookId/$chapterId" as any}
+                    params={{ sourceId, bookId, chapterId: firstChapter.chapterId } as any}
+                    className="btn-cta"
+                  >
+                    开始阅读
+                  </Link>
+                )}
                 <button
                   className="btn-secondary"
                   disabled={inShelf}
@@ -335,7 +346,7 @@ function NovelDetailContent() {
                   {refreshChaptersMutation.isPending ? "刷新中..." : "刷新目录"}
                 </button>
                 <button
-                  className="btn-primary"
+                  className="btn-secondary"
                   disabled={!chapters.length || downloadMutation.isPending}
                   onClick={() => downloadMutation.mutate(chapters)}
                 >
@@ -348,15 +359,6 @@ function NovelDetailContent() {
                 >
                   {exportMutation.isPending ? "导出中..." : "导出 EPUB"}
                 </button>
-                {firstChapter && (
-                  <Link
-                    to={"/novel/$sourceId/$bookId/$chapterId" as any}
-                    params={{ sourceId, bookId, chapterId: firstChapter.chapterId } as any}
-                    className="btn-secondary"
-                  >
-                    开始阅读
-                  </Link>
-                )}
               </div>
             </div>
           </div>
