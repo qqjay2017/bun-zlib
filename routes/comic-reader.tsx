@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { createRoute, Link } from "@tanstack/react-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { comicDetailRoute } from "./comic-detail";
 import { getManwapiImageApiUrl, sourceManwapi } from "../lib/sources/manwapi";
@@ -197,14 +197,13 @@ function ComicImage({ url, alt, eager }: { url: string; alt: string; eager: bool
   }, [url]);
 
   if (!src) {
-    return <div className="comic-strip-placeholder">图片加载中...</div>;
+    return <div className="comic-reader-placeholder">图片加载中...</div>;
   }
 
   return (
     <img
       src={src}
       alt={alt}
-      className="comic-strip-img"
       loading={eager ? "eager" : "lazy"}
       onError={() => {
         if (failed) return;
@@ -216,19 +215,48 @@ function ComicImage({ url, alt, eager }: { url: string; alt: string; eager: bool
 }
 
 function CachedComicImage({ src, alt, eager }: { src: string; alt: string; eager: boolean }) {
-  return (
-    <img
-      src={src}
-      alt={alt}
-      className="comic-strip-img"
-      loading={eager ? "eager" : "lazy"}
-    />
-  );
+  return <img src={src} alt={alt} loading={eager ? "eager" : "lazy"} />;
 }
+
+type PageMode = "single" | "spread";
+
+const PAGE_MODE_STORAGE_KEY = "comic-reader:page-mode";
+const WHEEL_TURN_THRESHOLD = 60;
+const WHEEL_COOLDOWN_MS = 400;
+
+function readStoredPageMode(): PageMode {
+  return window.localStorage.getItem(PAGE_MODE_STORAGE_KEY) === "spread" ? "spread" : "single";
+}
+
+/**
+ * 单页模式每页一组；双页模式两两配对，总页数为奇数时第1页单独作封面，
+ * 保证不管奇偶都恰好配完、不留残页。
+ */
+function buildPageSlots(pageCount: number, mode: PageMode): number[][] {
+  if (pageCount <= 0) return [];
+  if (mode === "single") {
+    return Array.from({ length: pageCount }, (_, index) => [index]);
+  }
+
+  const slots: number[][] = [];
+  const hasCoverPage = pageCount % 2 === 1;
+  if (hasCoverPage) slots.push([0]);
+  for (let index = hasCoverPage ? 1 : 0; index < pageCount; index += 2) {
+    slots.push([index, index + 1]);
+  }
+  return slots;
+}
+
+function findSlotIndexForPage(slots: number[][], pageIndex: number): number {
+  const found = slots.findIndex((slot) => slot.includes(pageIndex));
+  return found >= 0 ? found : 0;
+}
+
 
 function ComicReaderPage() {
   const { sourceId, bookId, chapterId } = comicReaderRoute.useParams();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   const bookQuery = useQuery({
     queryKey: ["comic", sourceId, bookId, "metadata"],
@@ -284,9 +312,20 @@ function ComicReaderPage() {
   const imageUrls = getImageUrls(chapter?.content);
   const cachedImages = cachedImagesQuery.data ?? [];
   const shouldUseCachedImages = cachedImages.length > 0;
+  const pageCount = shouldUseCachedImages ? cachedImages.length : imageUrls.length;
   const hasPrev = currentIndex > 0;
   const hasNext = currentIndex >= 0 && currentIndex < chapters.length - 1;
   const error = chapterListQuery.error || chapterQuery.error || refreshMutation.error || cacheImagesMutation.error;
+
+  const [pageMode, setPageMode] = useState<PageMode>(() => readStoredPageMode());
+  const [slotIndex, setSlotIndex] = useState(0);
+  const [catalogOpen, setCatalogOpen] = useState(false);
+
+  const slots = useMemo(() => buildPageSlots(pageCount, pageMode), [pageCount, pageMode]);
+
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const wheelAccumRef = useRef(0);
+  const wheelCooldownRef = useRef(false);
 
   useEffect(() => {
     if (chapter?.content && !cachedImages.length && !cacheImagesMutation.isPending && !cacheImagesMutation.error) {
@@ -308,21 +347,152 @@ function ComicReaderPage() {
     });
   }, [bookId, bookQuery.data, chapter, chapterMeta, sourceId]);
 
+  useEffect(() => {
+    setSlotIndex(0);
+  }, [chapterId]);
+
+  useEffect(() => {
+    if (slots.length && slotIndex > slots.length - 1) {
+      setSlotIndex(slots.length - 1);
+    }
+  }, [slots.length, slotIndex]);
+
+  useEffect(() => {
+    wheelAccumRef.current = 0;
+  }, [slotIndex]);
+
+  useEffect(() => {
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, []);
+
+  const goToChapter = useCallback(
+    (targetChapterId: string) => {
+      navigate({
+        to: "/comic/$sourceId/$bookId/$chapterId" as any,
+        params: { sourceId, bookId, chapterId: targetChapterId } as any,
+      });
+    },
+    [navigate, sourceId, bookId],
+  );
+
+  const goNext = useCallback(() => {
+    if (slotIndex < slots.length - 1) {
+      setSlotIndex(slotIndex + 1);
+      return;
+    }
+    if (hasNext) goToChapter(chapters[currentIndex + 1]!.chapterId);
+  }, [slotIndex, slots.length, hasNext, chapters, currentIndex, goToChapter]);
+
+  const goPrev = useCallback(() => {
+    if (slotIndex > 0) {
+      setSlotIndex(slotIndex - 1);
+      return;
+    }
+    if (hasPrev) goToChapter(chapters[currentIndex - 1]!.chapterId);
+  }, [slotIndex, hasPrev, chapters, currentIndex, goToChapter]);
+
+  const togglePageMode = useCallback(() => {
+    const nextMode: PageMode = pageMode === "single" ? "spread" : "single";
+    const currentFirstPage = slots[slotIndex]?.[0] ?? 0;
+    const nextSlots = buildPageSlots(pageCount, nextMode);
+    setPageMode(nextMode);
+    setSlotIndex(findSlotIndexForPage(nextSlots, currentFirstPage));
+    window.localStorage.setItem(PAGE_MODE_STORAGE_KEY, nextMode);
+  }, [pageMode, slots, slotIndex, pageCount]);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "ArrowRight" || event.key === "ArrowDown" || event.key === " ") {
+        event.preventDefault();
+        goNext();
+      } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+        event.preventDefault();
+        goPrev();
+      } else if (event.key === "Escape" && catalogOpen) {
+        setCatalogOpen(false);
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [goNext, goPrev, catalogOpen]);
+
+  useEffect(() => {
+    const node = viewportRef.current;
+    if (!node) return;
+
+    function handleWheel(event: WheelEvent) {
+      event.preventDefault();
+      if (wheelCooldownRef.current) return;
+
+      wheelAccumRef.current += event.deltaY;
+      if (wheelAccumRef.current > WHEEL_TURN_THRESHOLD) {
+        wheelAccumRef.current = 0;
+        wheelCooldownRef.current = true;
+        goNext();
+        window.setTimeout(() => { wheelCooldownRef.current = false; }, WHEEL_COOLDOWN_MS);
+      } else if (wheelAccumRef.current < -WHEEL_TURN_THRESHOLD) {
+        wheelAccumRef.current = 0;
+        wheelCooldownRef.current = true;
+        goPrev();
+        window.setTimeout(() => { wheelCooldownRef.current = false; }, WHEEL_COOLDOWN_MS);
+      }
+    }
+
+    node.addEventListener("wheel", handleWheel, { passive: false });
+    return () => node.removeEventListener("wheel", handleWheel);
+  }, [goNext, goPrev]);
+
+  function renderPage(pageIndex: number, eager: boolean) {
+    if (shouldUseCachedImages) {
+      const filename = cachedImages[pageIndex];
+      if (!filename) return null;
+      return (
+        <CachedComicImage
+          key={filename}
+          src={getCachedImageUrl(sourceId, bookId, chapterId, filename)}
+          alt={`${chapter?.chapterName || "漫画"} 第${pageIndex + 1}页`}
+          eager={eager}
+        />
+      );
+    }
+    const url = imageUrls[pageIndex];
+    if (!url) return null;
+    return (
+      <ComicImage
+        key={url}
+        url={url}
+        alt={`${chapter?.chapterName || "漫画"} 第${pageIndex + 1}页`}
+        eager={eager}
+      />
+    );
+  }
+
+  const visibleSlotIndices = [slotIndex - 1, slotIndex, slotIndex + 1].filter(
+    (index) => index >= 0 && index < slots.length,
+  );
+  const isFirstSlot = slotIndex === 0;
+  const isLastSlot = slotIndex === slots.length - 1;
+
   return (
-    <div className="page reader-page comic-reader-page-inner">
-      <div className="reader-header">
+    <div className="comic-reader-shell">
+      <div className="comic-reader-topbar">
         <Link
           to={"/comic/$sourceId/$bookId" as any}
           params={{ sourceId, bookId } as any}
-          className="back-btn"
+          className="comic-reader-back-btn"
         >
           返回目录
         </Link>
-        <span className="chapter-title-header">
+        <span className="comic-reader-title">
           {chapter?.chapterName || chapterMeta?.chapterName || "章节加载中..."}
         </span>
         <button
-          className="btn-secondary reader-cache-btn"
+          type="button"
+          className="comic-reader-cache-btn"
           disabled={!chapterMeta || refreshMutation.isPending}
           onClick={() => refreshMutation.mutate()}
         >
@@ -330,34 +500,43 @@ function ComicReaderPage() {
         </button>
       </div>
 
-      {error instanceof Error && <div className="error-message">{error.message}</div>}
-      {(chapterListQuery.isPending || chapterQuery.isPending) && (
-        <div className="empty-state">图片加载中...</div>
-      )}
+      <div className="comic-reader-viewport" ref={viewportRef}>
+        {error instanceof Error && <div className="comic-reader-error">{error.message}</div>}
+        {(chapterListQuery.isPending || chapterQuery.isPending) && (
+          <div className="comic-reader-empty">图片加载中...</div>
+        )}
 
-      {(shouldUseCachedImages || imageUrls.length > 0) && (
-        <div className="comic-strip">
-          {shouldUseCachedImages
-            ? cachedImages.map((filename, index) => (
-                <CachedComicImage
-                  key={filename}
-                  src={getCachedImageUrl(sourceId, bookId, chapterId, filename)}
-                  alt={`${chapter?.chapterName || "漫画"} 第${index + 1}页`}
-                  eager={index < 2}
-                />
-              ))
-            : imageUrls.map((url, index) => (
-                <ComicImage
-                  key={url}
-                  url={url}
-                  alt={`${chapter?.chapterName || "漫画"} 第${index + 1}页`}
-                  eager={index < 2}
-                />
-              ))}
-        </div>
-      )}
+        {visibleSlotIndices.map((index) => (
+          <div
+            key={index}
+            className="comic-reader-slot"
+            style={{ display: index === slotIndex ? "flex" : "none" }}
+          >
+            {slots[index]!.map((pageIndex) => renderPage(pageIndex, index === slotIndex))}
+          </div>
+        ))}
 
-      <div className="reader-nav">
+        <button
+          type="button"
+          className="comic-reader-arrow comic-reader-arrow-left"
+          onClick={goPrev}
+          disabled={isFirstSlot && !hasPrev}
+          aria-label="上一页"
+        >
+          ‹
+        </button>
+        <button
+          type="button"
+          className="comic-reader-arrow comic-reader-arrow-right"
+          onClick={goNext}
+          disabled={isLastSlot && !hasNext}
+          aria-label="下一页"
+        >
+          ›
+        </button>
+      </div>
+
+      <div className="comic-reader-toolbar">
         {hasPrev ? (
           <Link
             to={"/comic/$sourceId/$bookId/$chapterId" as any}
@@ -366,20 +545,32 @@ function ComicReaderPage() {
               bookId,
               chapterId: chapters[currentIndex - 1]!.chapterId,
             } as any}
-            className="btn-nav"
+            className="comic-reader-toolbar-btn"
           >
             上一章
           </Link>
         ) : (
-          <span className="btn-nav disabled">上一章</span>
+          <span className="comic-reader-toolbar-btn disabled">上一章</span>
         )}
-        <Link
-          to={"/comic/$sourceId/$bookId" as any}
-          params={{ sourceId, bookId } as any}
-          className="btn-nav btn-catalog"
+        <button
+          type="button"
+          className="comic-reader-toolbar-btn"
+          onClick={goPrev}
+          disabled={isFirstSlot && !hasPrev}
         >
-          目录
-        </Link>
+          ‹ 上一页
+        </button>
+        <span className="comic-reader-page-indicator">
+          {slots.length ? `${slotIndex + 1} / ${slots.length}` : "-- / --"}
+        </span>
+        <button
+          type="button"
+          className="comic-reader-toolbar-btn"
+          onClick={goNext}
+          disabled={isLastSlot && !hasNext}
+        >
+          下一页 ›
+        </button>
         {hasNext ? (
           <Link
             to={"/comic/$sourceId/$bookId/$chapterId" as any}
@@ -388,14 +579,59 @@ function ComicReaderPage() {
               bookId,
               chapterId: chapters[currentIndex + 1]!.chapterId,
             } as any}
-            className="btn-nav"
+            className="comic-reader-toolbar-btn"
           >
             下一章
           </Link>
         ) : (
-          <span className="btn-nav disabled">下一章</span>
+          <span className="comic-reader-toolbar-btn disabled">下一章</span>
         )}
+        <button type="button" className="comic-reader-toolbar-btn" onClick={togglePageMode}>
+          {pageMode === "single" ? "单页" : "双页"}
+        </button>
+        <button
+          type="button"
+          className="comic-reader-toolbar-btn"
+          onClick={() => setCatalogOpen((open) => !open)}
+        >
+          目录
+        </button>
       </div>
+
+      {catalogOpen && (
+        <div className="comic-reader-catalog-overlay" onClick={() => setCatalogOpen(false)}>
+          <div className="comic-reader-catalog-panel" onClick={(event) => event.stopPropagation()}>
+            <div className="comic-reader-catalog-header">
+              <span>目录（共{chapters.length}话）</span>
+              <button
+                type="button"
+                className="comic-reader-catalog-close"
+                onClick={() => setCatalogOpen(false)}
+                aria-label="关闭目录"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="comic-reader-catalog-list">
+              {chapters.map((item) => (
+                <Link
+                  key={item.chapterId}
+                  to={"/comic/$sourceId/$bookId/$chapterId" as any}
+                  params={{ sourceId, bookId, chapterId: item.chapterId } as any}
+                  className={
+                    item.chapterId === chapterId
+                      ? "comic-reader-catalog-item active"
+                      : "comic-reader-catalog-item"
+                  }
+                  onClick={() => setCatalogOpen(false)}
+                >
+                  第{item.chapterIndex + 1}话 {item.chapterName}
+                </Link>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

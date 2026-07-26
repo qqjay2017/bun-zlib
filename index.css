@@ -659,36 +659,6 @@ body {
   text-indent: 2em;
 }
 
-/* 漫画长条阅读 */
-.comic-strip {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0;
-  margin-bottom: 28px;
-  background: #f0f0f0;
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.comic-strip-img {
-  width: 100%;
-  max-width: 800px;
-  display: block;
-}
-
-.comic-strip-placeholder {
-  width: 100%;
-  max-width: 800px;
-  min-height: 320px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #999;
-  background: #f7f7f7;
-  border-bottom: 1px solid #e8e8e8;
-}
-
 /* 底部章节导航 */
 .reader-nav {
   display: flex;
@@ -875,4 +845,284 @@ body {
 .btn-clear-all:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* ===== 漫画分页阅读器（深色沉浸式） ===== */
+.comic-reader-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  background: #16161a;
+  color: #e6e6e6;
+}
+
+.comic-reader-topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 20px;
+  background: #1e1e24;
+  border-bottom: 1px solid #2c2c34;
+  flex-shrink: 0;
+}
+
+.comic-reader-back-btn {
+  flex-shrink: 0;
+  padding: 6px 14px;
+  background: transparent;
+  border: 1px solid #3a3a44;
+  border-radius: 4px;
+  color: #e6e6e6;
+  font-size: 13px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.comic-reader-back-btn:hover {
+  border-color: #ff6b35;
+  color: #ff6b35;
+}
+
+.comic-reader-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  color: #ccc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.comic-reader-cache-btn {
+  flex-shrink: 0;
+  padding: 6px 14px;
+  background: transparent;
+  border: 1px solid #3a3a44;
+  border-radius: 4px;
+  color: #e6e6e6;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.comic-reader-cache-btn:hover:not(:disabled) {
+  border-color: #ff6b35;
+  color: #ff6b35;
+}
+
+.comic-reader-cache-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.comic-reader-viewport {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.comic-reader-empty,
+.comic-reader-error {
+  color: #999;
+  font-size: 14px;
+}
+
+.comic-reader-error {
+  color: #ff7875;
+}
+
+.comic-reader-slot {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.comic-reader-slot img {
+  max-height: calc(100vh - 140px);
+  max-width: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.comic-reader-slot:has(img + img) img {
+  max-width: calc(50% - 1px);
+}
+
+.comic-reader-placeholder {
+  color: #999;
+  font-size: 14px;
+}
+
+.comic-reader-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+  z-index: 2;
+}
+
+.comic-reader-arrow:hover:not(:disabled) {
+  background: rgba(255, 107, 53, 0.6);
+}
+
+.comic-reader-arrow:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
+
+.comic-reader-arrow-left {
+  left: 16px;
+}
+
+.comic-reader-arrow-right {
+  right: 16px;
+}
+
+.comic-reader-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 12px 20px;
+  background: #1e1e24;
+  border-top: 1px solid #2c2c34;
+  flex-shrink: 0;
+}
+
+.comic-reader-toolbar-btn {
+  padding: 7px 16px;
+  background: transparent;
+  border: 1px solid #3a3a44;
+  border-radius: 999px;
+  color: #e6e6e6;
+  font-size: 13px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.comic-reader-toolbar-btn:hover:not(:disabled) {
+  border-color: #ff6b35;
+  color: #ff6b35;
+}
+
+.comic-reader-toolbar-btn:disabled,
+.comic-reader-toolbar-btn.disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.comic-reader-page-indicator {
+  font-size: 13px;
+  color: #999;
+  min-width: 64px;
+  text-align: center;
+}
+
+.comic-reader-catalog-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: flex-end;
+  z-index: 3;
+}
+
+.comic-reader-catalog-panel {
+  width: 320px;
+  max-width: 85vw;
+  height: 100%;
+  background: #1e1e24;
+  border-left: 1px solid #2c2c34;
+  display: flex;
+  flex-direction: column;
+}
+
+.comic-reader-catalog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  font-size: 14px;
+  color: #ccc;
+  border-bottom: 1px solid #2c2c34;
+}
+
+.comic-reader-catalog-close {
+  background: transparent;
+  border: none;
+  color: #999;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.comic-reader-catalog-close:hover {
+  color: #ff6b35;
+}
+
+.comic-reader-catalog-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.comic-reader-catalog-item {
+  display: block;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: #ccc;
+  text-decoration: none;
+  border-radius: 4px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.comic-reader-catalog-item:hover {
+  background: #2c2c34;
+  color: #fff;
+}
+
+.comic-reader-catalog-item.active {
+  color: #ff6b35;
+  background: rgba(255, 107, 53, 0.12);
+}
+
+@media (max-width: 560px) {
+  .comic-reader-toolbar {
+    gap: 6px;
+    padding: 10px 12px;
+  }
+
+  .comic-reader-toolbar-btn {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+
+  .comic-reader-arrow {
+    width: 36px;
+    height: 36px;
+    font-size: 18px;
+  }
 }
