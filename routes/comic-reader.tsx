@@ -5,6 +5,7 @@ import { comicDetailRoute } from "./comic-detail";
 import { getManwapiImageApiUrl, sourceManwapi } from "../lib/sources/manwapi";
 import { sourceManhuafree } from "../lib/sources/manhuafree";
 import type { BookSourceConfig } from "../lib/source-config";
+import type { BookMetadata } from "../lib/cache-types";
 import type { ChapterMetadata } from "../lib/cache-types";
 
 export const comicReaderRoute = createRoute({
@@ -53,6 +54,12 @@ async function getChapterList(sourceId: string, bookId: string): Promise<Chapter
   );
   if (!cached?.chapters.length) throw new Error("目录缓存不存在，请先打开详情页");
   return cached.chapters;
+}
+
+async function getBook(sourceId: string, bookId: string): Promise<BookMetadata> {
+  const cached = await readCache<BookMetadata>(`/api/cache/comic/${sourceId}/${bookId}/metadata`);
+  if (!cached) throw new Error("书籍缓存不存在");
+  return cached;
 }
 
 function getComicSource(sourceId: string): BookSourceConfig {
@@ -222,6 +229,12 @@ function ComicReaderPage() {
   const { sourceId, bookId, chapterId } = comicReaderRoute.useParams();
   const queryClient = useQueryClient();
 
+  const bookQuery = useQuery({
+    queryKey: ["comic", sourceId, bookId, "metadata"],
+    queryFn: () => getBook(sourceId, bookId),
+    staleTime: 60_000,
+  });
+
   const chapterListQuery = useQuery({
     queryKey: ["comic", sourceId, bookId, "chapters"],
     queryFn: () => getChapterList(sourceId, bookId),
@@ -279,6 +292,20 @@ function ComicReaderPage() {
       cacheImagesMutation.mutate();
     }
   }, [cachedImages.length, cacheImagesMutation, chapter?.content]);
+
+  useEffect(() => {
+    if (!chapter || !chapterMeta || !bookQuery.data) return;
+    void saveVisitHistory({
+      type: "comic",
+      sourceId,
+      bookId,
+      bookName: bookQuery.data.name,
+      chapterId: chapter.chapterId,
+      chapterName: chapter.chapterName,
+      path: window.location.pathname,
+      visitedAt: Date.now(),
+    });
+  }, [bookId, bookQuery.data, chapter, chapterMeta, sourceId]);
 
   return (
     <div className="page reader-page comic-reader-page-inner">

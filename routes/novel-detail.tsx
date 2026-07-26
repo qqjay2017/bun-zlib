@@ -3,6 +3,7 @@ import { createRoute, Link, Outlet, useMatches } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { novelRoute } from "./novel";
 import { source69shuba } from "../lib/sources/69shuba";
+import { saveVisitHistory } from "../lib/history-api";
 import { normalizeChapterOrder } from "../lib/chapter-order";
 import type { BookMetadata, ChapterMetadata } from "../lib/cache-types";
 
@@ -209,6 +210,18 @@ function NovelDetailContent() {
       setInShelf(isBookInShelf(sourceId, bookId));
     }
   }, [bookId, bookQuery.data, sourceId]);
+
+  useEffect(() => {
+    if (!book) return;
+    void saveVisitHistory({
+      type: "novel",
+      sourceId,
+      bookId,
+      bookName: book.name,
+      path: window.location.pathname,
+      visitedAt: Date.now(),
+    });
+  }, [book, bookId, sourceId]);
 
   const refreshDetailMutation = useMutation({
     mutationFn: () => fetchBookFromSource(sourceId, bookId),

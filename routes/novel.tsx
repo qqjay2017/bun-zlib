@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { createRoute, Outlet, useMatches, useNavigate } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import { rootRoute } from "./__root";
 import { source69shuba } from "../lib/sources/69shuba";
+import { readVisitHistory } from "../lib/history-api";
 
 export const novelRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -32,6 +34,11 @@ function NovelSearchPage() {
   const navigate = useNavigate();
 
   const currentSource = BOOK_SOURCES.find((s) => s.id === selectedSource)!;
+  const historyQuery = useQuery({
+    queryKey: ["history", "novel"],
+    queryFn: () => readVisitHistory("novel"),
+    staleTime: 10_000,
+  });
 
   const handleFetch = () => {
     const bookUrl = url.trim();
@@ -84,6 +91,24 @@ function NovelSearchPage() {
       </div>
 
       {error && <div className="error-message">{error}</div>}
+
+      <div className="history-section">
+        <div className="section-title">最近访问</div>
+        {historyQuery.data?.length ? (
+          <div className="history-list">
+            {historyQuery.data.map((item) => (
+              <a key={`${item.path}-${item.visitedAt}`} href={item.path} className="history-item">
+                <div className="history-item-title">{item.bookName}</div>
+                <div className="history-item-subtitle">
+                  {item.chapterName ? `章节：${item.chapterName}` : `来源：${item.sourceId}`}
+                </div>
+              </a>
+            ))}
+          </div>
+        ) : (
+          <div className="empty-state">暂无历史记录</div>
+        )}
+      </div>
     </div>
   );
 }

@@ -1,8 +1,11 @@
+import { useEffect } from "react";
 import { createRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { novelDetailRoute } from "./novel-detail";
 import { source69shuba } from "../lib/sources/69shuba";
+import { saveVisitHistory } from "../lib/history-api";
 import { normalizeChapterOrder } from "../lib/chapter-order";
+import type { BookMetadata } from "../lib/cache-types";
 import type { ChapterMetadata } from "../lib/cache-types";
 
 export const novelReaderRoute = createRoute({
@@ -56,6 +59,12 @@ async function getChapterList(sourceId: string, bookId: string): Promise<Chapter
   return normalizeChapterOrder(cached.chapters);
 }
 
+async function getBook(sourceId: string, bookId: string): Promise<BookMetadata> {
+  const cached = await readCache<BookMetadata>(`/api/cache/novel/${sourceId}/${bookId}/metadata`);
+  if (!cached) throw new Error("书籍缓存不存在");
+  return cached;
+}
+
 async function getChapter(
   sourceId: string,
   bookId: string,
@@ -81,6 +90,12 @@ async function getChapter(
 function NovelReaderPage() {
   const { sourceId, bookId, chapterId } = novelReaderRoute.useParams();
   const queryClient = useQueryClient();
+
+  const bookQuery = useQuery({
+    queryKey: ["novel", sourceId, bookId, "metadata"],
+    queryFn: () => getBook(sourceId, bookId),
+    staleTime: 60_000,
+  });
 
   const chapterListQuery = useQuery({
     queryKey: ["novel", sourceId, bookId, "chapters"],
@@ -112,6 +127,20 @@ function NovelReaderPage() {
   const hasPrev = currentIndex > 0;
   const hasNext = currentIndex >= 0 && currentIndex < chapters.length - 1;
   const error = chapterListQuery.error || chapterQuery.error || refreshMutation.error;
+
+  useEffect(() => {
+    if (!chapter || !chapterMeta || !bookQuery.data) return;
+    void saveVisitHistory({
+      type: "novel",
+      sourceId,
+      bookId,
+      bookName: bookQuery.data.name,
+      chapterId: chapter.chapterId,
+      chapterName: chapter.chapterName,
+      path: window.location.pathname,
+      visitedAt: Date.now(),
+    });
+  }, [bookId, bookQuery.data, chapter, chapterMeta, sourceId]);
 
   return (
     <div className="page reader-page">

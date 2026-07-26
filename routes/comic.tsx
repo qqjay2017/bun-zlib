@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { createRoute, Outlet, useMatches } from "@tanstack/react-router";
 import { useNavigate } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import { rootRoute } from "./__root";
 import { sourceManwapi } from "../lib/sources/manwapi";
 import { sourceManhuafree } from "../lib/sources/manhuafree";
+import { readVisitHistory } from "../lib/history-api";
 
 export const comicRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -35,6 +37,11 @@ function ComicSearchPage() {
   const navigate = useNavigate();
 
   const currentSource = COMIC_SOURCES.find((source) => source.id === selectedSource)!;
+  const historyQuery = useQuery({
+    queryKey: ["history", "comic"],
+    queryFn: () => readVisitHistory("comic"),
+    staleTime: 10_000,
+  });
 
   const handleFetch = () => {
     const comicUrl = url.trim();
@@ -88,6 +95,24 @@ function ComicSearchPage() {
       </div>
 
       {error && <div className="error-message">{error}</div>}
+
+      <div className="history-section">
+        <div className="section-title">最近访问</div>
+        {historyQuery.data?.length ? (
+          <div className="history-list">
+            {historyQuery.data.map((item) => (
+              <a key={`${item.path}-${item.visitedAt}`} href={item.path} className="history-item">
+                <div className="history-item-title">{item.bookName}</div>
+                <div className="history-item-subtitle">
+                  {item.chapterName ? `章节：${item.chapterName}` : `来源：${item.sourceId}`}
+                </div>
+              </a>
+            ))}
+          </div>
+        ) : (
+          <div className="empty-state">暂无历史记录</div>
+        )}
+      </div>
     </div>
   );
 }
