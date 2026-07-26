@@ -152,7 +152,7 @@ const sourceManhuafree: BookSourceConfig = {
 
   getTocUrl(url: string): string {
     const mid = getMidFromUrl(url);
-    return `${getApiHostFromUrl(url)}/api/manga/get?mid=${mid}`;
+    return `${getApiHostFromUrl(url)}/api/v2/manga/get?mid=${encodeURIComponent(mid)}&mode=all`;
   },
 
   extractors: {
@@ -190,10 +190,16 @@ const sourceManhuafree: BookSourceConfig = {
 
     getChapterList(doc: Document) {
       const data = parseJsonText(doc.documentElement.outerHTML);
-      const mid = data?.data?.id || getMidFromUrl(doc.baseURI || '');
+      const manga = data?.data?.manga || data?.data?.info || data?.data;
+      const mid = manga?.id || data?.data?.id || getMidFromUrl(doc.baseURI || '');
       const apiHost = getApiHostFromUrl(doc.baseURI || '');
-      const slug = data?.data?.slug || '';
-      const chapters = Array.isArray(data?.data?.chapters) ? data.data.chapters : [];
+      const slug = manga?.slug || data?.data?.slug || '';
+      const rawChapters = manga?.chapters || data?.data?.chapters || data?.chapters;
+      const chapters = Array.isArray(rawChapters?.data)
+        ? rawChapters.data
+        : Array.isArray(rawChapters)
+          ? rawChapters
+          : [];
 
       return chapters
         .slice()
