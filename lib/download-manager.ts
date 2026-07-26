@@ -5,37 +5,43 @@ import type {
   ProgressListener,
   TaskProgress,
   TaskStatus,
-} from './download-types';
-import { fetchPageHtml, fetchRemoteText } from '../backend';
-import { loadChapter, saveChapter } from './cache-manager';
-import { getDb } from './db';
-import type { ContentType } from './cache-types';
-import { getSourceById } from './source-config';
-import { getManwapiImageApiUrl } from './sources/manwapi';
-import { cacheComicChapterImages } from './comic-assets';
+} from "./download-types";
+import { fetchPageHtml, fetchRemoteText } from "../backend";
+import { loadChapter, saveChapter } from "./cache-manager";
+import { getDb } from "./db";
+import type { ContentType } from "./cache-types";
+import { getSourceById } from "./source-config";
+import { getManwapiImageApiUrl } from "./sources/manwapi";
+import { cacheComicChapterImages } from "./comic-assets";
 
 // ============================================================
 // 常量
 // ============================================================
 
-const MAX_CONCURRENCY = 4;
-const HTTP_ONLY_SOURCES = new Set(['manwapi']);
+const MAX_CONCURRENCY = 8;
+const HTTP_ONLY_SOURCES = new Set(["manwapi"]);
 const CHAPTER_DELAY_MS = 500;
 const HTTP_ONLY_CHAPTER_DELAY_MS = 0;
 
 function getChapterDelayMs(sourceId: string): number {
-  return HTTP_ONLY_SOURCES.has(sourceId) ? HTTP_ONLY_CHAPTER_DELAY_MS : CHAPTER_DELAY_MS;
+  return HTTP_ONLY_SOURCES.has(sourceId)
+    ? HTTP_ONLY_CHAPTER_DELAY_MS
+    : CHAPTER_DELAY_MS;
 }
 
 class CloudflareChallengeError extends Error {
   constructor() {
-    super('触发 Cloudflare 校验，已停止缓存任务。请先在 Chrome/WebView 中通过验证后再继续。');
-    this.name = 'CloudflareChallengeError';
+    super(
+      "触发 Cloudflare 校验，已停止缓存任务。请先在 Chrome/WebView 中通过验证后再继续。",
+    );
+    this.name = "CloudflareChallengeError";
   }
 }
 
 function isChallengePage(html: string): boolean {
-  return /Just a moment|请稍候|正在进行安全验证|cf-turnstile|challenges\.cloudflare\.com/i.test(html);
+  return /Just a moment|请稍候|正在进行安全验证|cf-turnstile|challenges\.cloudflare\.com/i.test(
+    html,
+  );
 }
 
 // ============================================================
@@ -84,12 +90,20 @@ class DownloadManager {
   // ----------------------------------------------------------
 
   createTask(req: CreateDownloadRequest): DownloadTask {
+    const existing = this.findTaskForBook(req.sourceId, req.bookId, req.contentType);
+    if (existing) {
+      if (existing.status === "pending" || existing.status === "downloading") {
+        return existing;
+      }
+      this.removeTask(existing.taskId);
+    }
+
     const now = Date.now();
     const taskId = `dl_${now}_${Math.random().toString(36).slice(2, 8)}`;
 
     const chapters: ChapterDownloadItem[] = req.chapters.map((ch) => ({
       ...ch,
-      status: 'pending' as const,
+      status: "pending" as const,
     }));
 
     const progress: TaskProgress = {
@@ -105,7 +119,7 @@ class DownloadManager {
       bookId: req.bookId,
       contentType: req.contentType,
       chapters,
-      status: 'pending',
+      status: "pending",
       progress,
       createdAt: now,
       updatedAt: now,
@@ -122,14 +136,14 @@ class DownloadManager {
   cancelTask(taskId: string): boolean {
     const task = this.tasks.get(taskId);
     if (!task) return false;
-    if (task.status === 'completed' || task.status === 'cancelled') return false;
+    if (task.status !== "pending" && task.status !== "downloading") return false;
 
-    task.status = 'cancelled';
+    task.status = "cancelled";
     task.updatedAt = Date.now();
 
     for (const ch of task.chapters) {
-      if (ch.status === 'pending' || ch.status === 'downloading') {
-        ch.status = 'failed';
+      if (ch.status === "pending" || ch.status === "downloading") {
+        ch.status = "failed";
         this.persistChapterStatus(taskId, ch.chapterId, ch.status);
       }
     }
@@ -139,24 +153,47 @@ class DownloadManager {
     return true;
   }
 
+  retryTask(taskId: string): DownloadTask | undefined {
+    const task = this.tasks.get(taskId);
+    if (!task || task.status !== "cancelled") return undefined;
+
+    const req: CreateDownloadRequest = {
+      sourceId: task.sourceId,
+      bookId: task.bookId,
+      contentType: task.contentType,
+      chapters: task.chapters.map((chapter) => ({
+        chapterId: chapter.chapterId,
+        chapterName: chapter.chapterName,
+        chapterDetailUrl: chapter.chapterDetailUrl,
+      })),
+    };
+
+    this.removeTask(taskId);
+    return this.createTask(req);
+  }
+
   async clearTasks(): Promise<number> {
     const count = this.tasks.size;
 
     for (const task of this.tasks.values()) {
-      if (task.status !== 'completed' && task.status !== 'failed' && task.status !== 'cancelled') {
-        task.status = 'cancelled';
+      if (
+        task.status !== "completed" &&
+        task.status !== "failed" &&
+        task.status !== "cancelled"
+      ) {
+        task.status = "cancelled";
         task.updatedAt = Date.now();
 
         for (const ch of task.chapters) {
-          if (ch.status === 'pending' || ch.status === 'downloading') {
-            ch.status = 'failed';
+          if (ch.status === "pending" || ch.status === "downloading") {
+            ch.status = "failed";
           }
         }
       }
     }
 
     this.tasks.clear();
-    getDb().run('DELETE FROM download_tasks');
+    getDb().run("DELETE FROM download_tasks");
     return count;
   }
 
@@ -184,20 +221,28 @@ class DownloadManager {
     if (this.activeCount >= MAX_CONCURRENCY) return;
 
     for (const task of this.tasks.values()) {
-      if (task.status === 'cancelled' || task.status === 'completed' || task.status === 'failed') {
+      if (
+        task.status === "cancelled" ||
+        task.status === "completed" ||
+        task.status === "failed"
+      ) {
         continue;
       }
 
-      const nextChapter = task.chapters.find((ch) => ch.status === 'pending');
+      const nextChapter = task.chapters.find((ch) => ch.status === "pending");
       if (!nextChapter) continue;
 
-      if (task.status === 'pending') {
-        task.status = 'downloading';
+      if (task.status === "pending") {
+        task.status = "downloading";
         task.updatedAt = Date.now();
       }
 
-      nextChapter.status = 'downloading';
-      this.persistChapterStatus(task.taskId, nextChapter.chapterId, nextChapter.status);
+      nextChapter.status = "downloading";
+      this.persistChapterStatus(
+        task.taskId,
+        nextChapter.chapterId,
+        nextChapter.status,
+      );
       this.activeCount++;
       this.executeChapter(task, nextChapter);
 
@@ -209,7 +254,10 @@ class DownloadManager {
   // 章节执行（executor 模式）
   // ----------------------------------------------------------
 
-  private async executeChapter(task: DownloadTask, chapter: ChapterDownloadItem): Promise<void> {
+  private async executeChapter(
+    task: DownloadTask,
+    chapter: ChapterDownloadItem,
+  ): Promise<void> {
     try {
       // 去重：如果缓存中已存在该章节，直接标记完成
       const existing = await loadChapter(
@@ -220,11 +268,15 @@ class DownloadManager {
       );
 
       if (existing?.content) {
-        if (task.contentType === 'comic') {
+        if (task.contentType === "comic") {
           await cacheComicChapterImages(task.sourceId, task.bookId, existing);
         }
-        chapter.status = 'completed';
-        this.persistChapterStatus(task.taskId, chapter.chapterId, chapter.status);
+        chapter.status = "completed";
+        this.persistChapterStatus(
+          task.taskId,
+          chapter.chapterId,
+          chapter.status,
+        );
         task.progress.completed++;
         this.updateProgress(task);
         this.notifyListeners(task);
@@ -251,7 +303,10 @@ class DownloadManager {
             if (extracted.chapterName) chapterName = extracted.chapterName;
           }
         } catch (err) {
-          console.error(`[DownloadManager] extractor 提取失败，回退到完整 HTML:`, err);
+          console.error(
+            `[DownloadManager] extractor 提取失败，回退到完整 HTML:`,
+            err,
+          );
         }
       }
 
@@ -264,24 +319,32 @@ class DownloadManager {
         content,
       };
 
-      await saveChapter(task.contentType, task.sourceId, task.bookId, cachedChapter);
-      if (task.contentType === 'comic') {
+      await saveChapter(
+        task.contentType,
+        task.sourceId,
+        task.bookId,
+        cachedChapter,
+      );
+      if (task.contentType === "comic") {
         await cacheComicChapterImages(task.sourceId, task.bookId, {
           ...cachedChapter,
           cachedAt: Date.now(),
         });
       }
 
-      chapter.status = 'completed';
+      chapter.status = "completed";
       task.progress.completed++;
     } catch (err) {
-      chapter.status = 'failed';
+      chapter.status = "failed";
       task.progress.failed++;
       if (err instanceof CloudflareChallengeError) {
-        task.status = 'failed';
+        task.status = "failed";
         task.error = err.message;
       }
-      console.error(`[DownloadManager] 章节下载失败: ${chapter.chapterName}`, err);
+      console.error(
+        `[DownloadManager] 章节下载失败: ${chapter.chapterName}`,
+        err,
+      );
     }
 
     this.persistChapterStatus(task.taskId, chapter.chapterId, chapter.status);
@@ -298,20 +361,20 @@ class DownloadManager {
     this.activeCount--;
 
     const allDone = task.chapters.every(
-      (ch) => ch.status === 'completed' || ch.status === 'failed',
+      (ch) => ch.status === "completed" || ch.status === "failed",
     );
 
-    if (allDone && task.status !== 'cancelled') {
+    if (allDone && task.status !== "cancelled") {
       if (task.progress.failed === task.progress.total) {
-        task.status = 'failed';
-        task.error = '所有章节下载失败';
+        task.status = "failed";
+        task.error = "所有章节下载失败";
       } else {
-        task.status = 'completed';
+        task.status = "completed";
       }
       task.updatedAt = Date.now();
       this.notifyListeners(task);
       this.persistTaskHeader(task);
-    } else if (task.status !== 'cancelled') {
+    } else if (task.status !== "cancelled") {
       this.persistTaskHeader(task);
     }
 
@@ -323,15 +386,42 @@ class DownloadManager {
   // 工具方法
   // ----------------------------------------------------------
 
+  private bookKey(sourceId: string, bookId: string, contentType: ContentType): string {
+    return `${contentType}:${sourceId}:${bookId}`;
+  }
+
+  private findTaskForBook(
+    sourceId: string,
+    bookId: string,
+    contentType: ContentType,
+  ): DownloadTask | undefined {
+    const key = this.bookKey(sourceId, bookId, contentType);
+    for (const task of this.tasks.values()) {
+      if (this.bookKey(task.sourceId, task.bookId, task.contentType) === key) {
+        return task;
+      }
+    }
+    return undefined;
+  }
+
+  private removeTask(taskId: string): void {
+    this.tasks.delete(taskId);
+    getDb().query("DELETE FROM download_tasks WHERE task_id = ?").run(taskId);
+  }
+
   private updateProgress(task: DownloadTask): void {
     task.progress.percent = Math.round(
-      ((task.progress.completed + task.progress.failed) / task.progress.total) * 100,
+      ((task.progress.completed + task.progress.failed) / task.progress.total) *
+        100,
     );
     task.updatedAt = Date.now();
   }
 
-  private async fetchChapterContent(task: DownloadTask, chapter: ChapterDownloadItem): Promise<string> {
-    if (task.contentType === 'comic' && task.sourceId === 'manwapi') {
+  private async fetchChapterContent(
+    task: DownloadTask,
+    chapter: ChapterDownloadItem,
+  ): Promise<string> {
+    if (task.contentType === "comic" && task.sourceId === "manwapi") {
       return fetchRemoteText(getManwapiImageApiUrl(chapter.chapterId));
     }
 
@@ -349,7 +439,7 @@ class DownloadManager {
       try {
         fn(task);
       } catch (err) {
-        console.error('[DownloadManager] listener 回调异常:', err);
+        console.error("[DownloadManager] listener 回调异常:", err);
       }
     }
   }
@@ -361,7 +451,9 @@ class DownloadManager {
   private persistTaskHeader(task: DownloadTask): void {
     if (!this.tasks.has(task.taskId)) return;
 
-    getDb().query(`
+    getDb()
+      .query(
+        `
       INSERT INTO download_tasks (task_id, source_id, book_id, content_type, status, total, completed, failed, percent, error, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT (task_id) DO UPDATE SET
@@ -372,20 +464,22 @@ class DownloadManager {
         percent = excluded.percent,
         error = excluded.error,
         updated_at = excluded.updated_at
-    `).run(
-      task.taskId,
-      task.sourceId,
-      task.bookId,
-      task.contentType,
-      task.status,
-      task.progress.total,
-      task.progress.completed,
-      task.progress.failed,
-      task.progress.percent,
-      task.error ?? null,
-      task.createdAt,
-      task.updatedAt,
-    );
+    `,
+      )
+      .run(
+        task.taskId,
+        task.sourceId,
+        task.bookId,
+        task.contentType,
+        task.status,
+        task.progress.total,
+        task.progress.completed,
+        task.progress.failed,
+        task.progress.percent,
+        task.error ?? null,
+        task.createdAt,
+        task.updatedAt,
+      );
   }
 
   private insertTaskChapters(task: DownloadTask): void {
@@ -402,24 +496,43 @@ class DownloadManager {
 
     db.transaction(() => {
       task.chapters.forEach((chapter, seq) => {
-        insertChapter.run(task.taskId, seq, chapter.chapterId, chapter.chapterName, chapter.chapterDetailUrl, chapter.status);
+        insertChapter.run(
+          task.taskId,
+          seq,
+          chapter.chapterId,
+          chapter.chapterName,
+          chapter.chapterDetailUrl,
+          chapter.status,
+        );
       });
     })();
   }
 
-  private persistChapterStatus(taskId: string, chapterId: string, status: ChapterDownloadItem['status']): void {
+  private persistChapterStatus(
+    taskId: string,
+    chapterId: string,
+    status: ChapterDownloadItem["status"],
+  ): void {
     if (!this.tasks.has(taskId)) return;
 
-    getDb().query(`
+    getDb()
+      .query(
+        `
       UPDATE download_task_chapters SET status = ? WHERE task_id = ? AND chapter_id = ?
-    `).run(status, taskId, chapterId);
+    `,
+      )
+      .run(status, taskId, chapterId);
   }
 
   private restore(): void {
     const db = getDb();
-    const taskRows = db.query('SELECT * FROM download_tasks').all() as DownloadTaskRow[];
+    const taskRows = db
+      .query("SELECT * FROM download_tasks")
+      .all() as DownloadTaskRow[];
     const chapterRows = db
-      .query('SELECT * FROM download_task_chapters ORDER BY task_id ASC, seq ASC')
+      .query(
+        "SELECT * FROM download_task_chapters ORDER BY task_id ASC, seq ASC",
+      )
       .all() as DownloadTaskChapterRow[];
 
     const chaptersByTask = new Map<string, ChapterDownloadItem[]>();
@@ -429,7 +542,7 @@ class DownloadManager {
         chapterId: row.chapter_id,
         chapterName: row.chapter_name,
         chapterDetailUrl: row.chapter_detail_url,
-        status: row.status as ChapterDownloadItem['status'],
+        status: row.status as ChapterDownloadItem["status"],
       });
       chaptersByTask.set(row.task_id, list);
     }
@@ -455,18 +568,39 @@ class DownloadManager {
 
       this.tasks.set(task.taskId, task);
 
-      if (task.status === 'downloading' || task.status === 'pending') {
-        task.status = 'cancelled';
-        task.error = '服务重启后已停止未完成的缓存任务，请手动重新开始。';
+      if (task.status === "downloading" || task.status === "pending") {
+        task.status = "cancelled";
+        task.error = "服务重启后已停止未完成的缓存任务，请手动重新开始。";
 
         for (const ch of task.chapters) {
-          if (ch.status === 'downloading' || ch.status === 'pending') {
-            ch.status = 'failed';
+          if (ch.status === "downloading" || ch.status === "pending") {
+            ch.status = "failed";
             this.persistChapterStatus(task.taskId, ch.chapterId, ch.status);
           }
         }
 
         this.persistTaskHeader(task);
+      }
+    }
+
+    this.dedupeTasksByBook();
+  }
+
+  /** 同一本书只保留最新一条任务，清理历史遗留的重复记录 */
+  private dedupeTasksByBook(): void {
+    const latestByBook = new Map<string, DownloadTask>();
+    for (const task of this.tasks.values()) {
+      const key = this.bookKey(task.sourceId, task.bookId, task.contentType);
+      const current = latestByBook.get(key);
+      if (!current || task.createdAt > current.createdAt) {
+        latestByBook.set(key, task);
+      }
+    }
+
+    const keep = new Set([...latestByBook.values()].map((t) => t.taskId));
+    for (const taskId of [...this.tasks.keys()]) {
+      if (!keep.has(taskId)) {
+        this.removeTask(taskId);
       }
     }
   }

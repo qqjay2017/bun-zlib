@@ -44,6 +44,7 @@ const MIN_BOOK_VIEW_NAVIGATION_INTERVAL_MS = 300;
 const MAX_BOOK_VIEW_NAVIGATION_INTERVAL_MS = 2_000;
 const FETCH_HTML_TTL_MS = 30_000;
 const BOOK_VIEW_STEP_TIMEOUT_MS = 45_000;
+const BOOK_VIEW_CREATE_TIMEOUT_MS = 45_000;
 const htmlFetchCache = new Map<string, {
   fetchedAt: number;
   html?: string;
@@ -136,8 +137,14 @@ export async function fetchBookPageHtml(url: string): Promise<string> {
   lane.pendingCount++;
 
   const task = lane.queue.then(async () => {
+    let view: Bun.WebView | undefined;
     try {
-      const view = await getLaneView(lane);
+      const pendingView = getLaneView(lane);
+      view = await withTimeout(
+        pendingView,
+        BOOK_VIEW_CREATE_TIMEOUT_MS,
+        `WebView 创建超时（${BOOK_VIEW_CREATE_TIMEOUT_MS}ms）`,
+      );
       const waitMs = Math.max(
         0,
         getRandomNavigationInterval() - (Date.now() - lane.lastNavigationAt),
@@ -168,6 +175,13 @@ export async function fetchBookPageHtml(url: string): Promise<string> {
 
       return html;
     } catch (error) {
+      if (view) {
+        view.close();
+      } else if (lane.view) {
+        // getLaneView 本身超时/未完成：原 promise 可能仍在后台创建 WebView，
+        // 挂一个兜底清理，避免它日后 resolve 时残留未关闭的 Chrome 进程。
+        lane.view.then((v) => v.close()).catch(() => {});
+      }
       lane.view = null;
       throw error;
     } finally {

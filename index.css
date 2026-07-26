@@ -746,15 +746,35 @@ body {
   margin-bottom: 10px;
 }
 
+.task-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .task-title {
   font-weight: 600;
   font-size: 15px;
   color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-type-badge {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: #666;
+  background: #f0f0f0;
+  padding: 1px 8px;
+  border-radius: 10px;
 }
 
 .task-chapters {
   font-size: 13px;
   color: #999;
+  flex-shrink: 0;
 }
 
 .task-progress {
@@ -807,6 +827,53 @@ body {
   font-size: 13px;
   color: #666;
   margin-bottom: 8px;
+}
+
+.task-expand-btn {
+  background: none;
+  border: none;
+  color: #4a90d9;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 0;
+  margin-bottom: 4px;
+}
+
+.task-expand-btn:hover {
+  text-decoration: underline;
+}
+
+.chapter-list {
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid #f0f0f0;
+  border-radius: 4px;
+  margin-bottom: 8px;
+}
+
+.chapter-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  font-size: 13px;
+  border-bottom: 1px solid #f5f5f5;
+}
+
+.chapter-row:last-child {
+  border-bottom: none;
+}
+
+.chapter-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #555;
+}
+
+.chapter-row-status {
+  flex-shrink: 0;
 }
 
 .task-actions {

@@ -47,6 +47,22 @@ const STATUS_LABELS: Record<TaskStatus, string> = {
 
 const STALL_WARNING_MS = 60_000;
 
+const CHAPTER_STATUS_LABELS: Record<ChapterDownloadItem["status"], string> = {
+  pending: "等待中",
+  downloading: "下载中",
+  completed: "已完成",
+  failed: "失败",
+};
+
+const CONTENT_TYPE_LABELS: Record<string, string> = {
+  novel: "小说",
+  comic: "漫画",
+};
+
+function titleCacheKey(task: DownloadTask): string {
+  return `${task.contentType}:${task.sourceId}:${task.bookId}`;
+}
+
 interface DownloadCenterPanelProps {
   onClose?: () => void;
 }
@@ -55,7 +71,10 @@ export function DownloadCenterPanel({ onClose }: DownloadCenterPanelProps = {}) 
   const [tasks, setTasks] = useState<DownloadTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [clearing, setClearing] = useState(false);
+  const [mutatingTaskId, setMutatingTaskId] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [titles, setTitles] = useState<Record<string, string>>({});
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
 
   const fetchTasks = useCallback(() => {
     fetch("/api/download/tasks")
@@ -97,10 +116,62 @@ export function DownloadCenterPanel({ onClose }: DownloadCenterPanelProps = {}) 
     return () => clearInterval(timer);
   }, [tasks]);
 
+  // 补齐还没取到书名的任务
+  useEffect(() => {
+    const missing = tasks.filter((t) => !(titleCacheKey(t) in titles));
+    if (missing.length === 0) return;
+
+    missing.forEach((task) => {
+      const key = titleCacheKey(task);
+      fetch(`/api/cache/${task.contentType}/${task.sourceId}/${task.bookId}/metadata`)
+        .then((res) => res.json())
+        .then((result: { success: boolean; data: { name: string } | null }) => {
+          setTitles((prev) => ({
+            ...prev,
+            [key]: result.success && result.data ? result.data.name : "",
+          }));
+        })
+        .catch(() => {
+          setTitles((prev) => ({ ...prev, [key]: "" }));
+        });
+    });
+  }, [tasks, titles]);
+
+  const toggleExpanded = useCallback((taskId: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(taskId)) {
+        next.delete(taskId);
+      } else {
+        next.add(taskId);
+      }
+      return next;
+    });
+  }, []);
+
   const handleCancel = useCallback(async (taskId: string) => {
-    await fetch(`/api/download/${taskId}`, { method: "DELETE" });
-    fetchTasks();
-  }, [fetchTasks]);
+    if (mutatingTaskId) return;
+
+    setMutatingTaskId(taskId);
+    try {
+      await fetch(`/api/download/${taskId}`, { method: "DELETE" });
+      fetchTasks();
+    } finally {
+      setMutatingTaskId(null);
+    }
+  }, [fetchTasks, mutatingTaskId]);
+
+  const handleRetry = useCallback(async (taskId: string) => {
+    if (mutatingTaskId) return;
+
+    setMutatingTaskId(taskId);
+    try {
+      await fetch(`/api/download/${taskId}/retry`, { method: "POST" });
+      fetchTasks();
+    } finally {
+      setMutatingTaskId(null);
+    }
+  }, [fetchTasks, mutatingTaskId]);
 
   const handleClearAll = useCallback(async () => {
     if (clearing || tasks.length === 0) return;
@@ -167,11 +238,19 @@ export function DownloadCenterPanel({ onClose }: DownloadCenterPanelProps = {}) 
             const downloadingChapter = task.chapters.find((ch) => ch.status === "downloading");
             const stalledMs = now - task.updatedAt;
             const isStalled = task.status === "downloading" && stalledMs > STALL_WARNING_MS;
+            const title = titles[titleCacheKey(task)];
+            const isExpanded = expanded.has(task.taskId);
+            const isMutating = mutatingTaskId === task.taskId;
             return (
               <div className="task-card" key={task.taskId}>
                 <div className="task-header">
-                  <span className="task-title">
-                    {task.sourceId}_{task.bookId}
+                  <span className="task-title-group">
+                    <span className="task-title">
+                      {title || `${task.sourceId}_${task.bookId}`}
+                    </span>
+                    <span className="task-type-badge">
+                      {CONTENT_TYPE_LABELS[task.contentType] ?? task.contentType}
+                    </span>
                   </span>
                   <span className="task-chapters">
                     共{progress.total}章
@@ -218,13 +297,52 @@ export function DownloadCenterPanel({ onClose }: DownloadCenterPanelProps = {}) 
                   <div className="task-error">{task.error}</div>
                 )}
 
+                <button
+                  type="button"
+                  className="task-expand-btn"
+                  onClick={() => toggleExpanded(task.taskId)}
+                >
+                  {isExpanded ? "收起章节 ▲" : "展开章节 ▼"}
+                </button>
+
+                {isExpanded && (
+                  <div className="chapter-list">
+                    {task.chapters.map((ch, idx) => (
+                      <div className="chapter-row" key={ch.chapterId}>
+                        <span className="chapter-row-name">
+                          {idx + 1}. {ch.chapterName}
+                        </span>
+                        <span
+                          className="chapter-row-status"
+                          style={{ color: STATUS_COLORS[ch.status] }}
+                        >
+                          {CHAPTER_STATUS_LABELS[ch.status]}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 {(task.status === "pending" || task.status === "downloading") && (
                   <div className="task-actions">
                     <button
                       className="btn-cancel"
+                      disabled={isMutating}
                       onClick={() => handleCancel(task.taskId)}
                     >
-                      取消
+                      {isMutating ? "取消中..." : "取消"}
+                    </button>
+                  </div>
+                )}
+
+                {task.status === "cancelled" && (
+                  <div className="task-actions">
+                    <button
+                      className="btn-cancel"
+                      disabled={isMutating}
+                      onClick={() => handleRetry(task.taskId)}
+                    >
+                      {isMutating ? "重试中..." : "重试"}
                     </button>
                   </div>
                 )}

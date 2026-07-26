@@ -53,6 +53,17 @@ defineController("/api/download", {
     return Response.json({ success: true, data: job });
   },
 
+  "POST /:taskId/retry": async (_req, params) => {
+    const task = downloadManager.retryTask(params.taskId!);
+    if (!task) {
+      return Response.json(
+        { success: false, error: "仅支持重试已取消的下载任务" },
+        { status: 400 },
+      );
+    }
+    return Response.json({ success: true, data: task });
+  },
+
   "GET /progress": async () => {
     let listener: ProgressListener;
 
