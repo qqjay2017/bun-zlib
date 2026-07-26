@@ -45,6 +45,8 @@ const STATUS_LABELS: Record<TaskStatus, string> = {
   cancelled: "已取消",
 };
 
+const STALL_WARNING_MS = 60_000;
+
 interface DownloadCenterPanelProps {
   onClose?: () => void;
 }
@@ -53,6 +55,7 @@ export function DownloadCenterPanel({ onClose }: DownloadCenterPanelProps = {}) 
   const [tasks, setTasks] = useState<DownloadTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [clearing, setClearing] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
 
   const fetchTasks = useCallback(() => {
     fetch("/api/download/tasks")
@@ -86,6 +89,13 @@ export function DownloadCenterPanel({ onClose }: DownloadCenterPanelProps = {}) 
     };
     return () => es.close();
   }, []);
+
+  // 有下载中的任务时，定时刷新“已停滞”提示
+  useEffect(() => {
+    if (!tasks.some((t) => t.status === "downloading")) return;
+    const timer = setInterval(() => setNow(Date.now()), 5_000);
+    return () => clearInterval(timer);
+  }, [tasks]);
 
   const handleCancel = useCallback(async (taskId: string) => {
     await fetch(`/api/download/${taskId}`, { method: "DELETE" });
@@ -154,6 +164,9 @@ export function DownloadCenterPanel({ onClose }: DownloadCenterPanelProps = {}) 
         <div className="task-list">
           {tasks.map((task) => {
             const progress = task.progress;
+            const downloadingChapter = task.chapters.find((ch) => ch.status === "downloading");
+            const stalledMs = now - task.updatedAt;
+            const isStalled = task.status === "downloading" && stalledMs > STALL_WARNING_MS;
             return (
               <div className="task-card" key={task.taskId}>
                 <div className="task-header">
@@ -188,6 +201,18 @@ export function DownloadCenterPanel({ onClose }: DownloadCenterPanelProps = {}) 
                     状态: {STATUS_LABELS[task.status]}
                   </span>
                 </div>
+
+                {downloadingChapter && (
+                  <div className="task-current-chapter">
+                    正在下载：{downloadingChapter.chapterName}
+                  </div>
+                )}
+
+                {isStalled && (
+                  <div className="task-error">
+                    已 {Math.round(stalledMs / 1000)} 秒无进展，可能已卡住，可尝试"取消"后重新发起缓存
+                  </div>
+                )}
 
                 {task.error && (
                   <div className="task-error">{task.error}</div>

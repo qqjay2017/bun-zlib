@@ -43,6 +43,7 @@ const bookViewLanes: BookViewLane[] = Array.from({ length: WEBVIEW_POOL_SIZE }, 
 const MIN_BOOK_VIEW_NAVIGATION_INTERVAL_MS = 300;
 const MAX_BOOK_VIEW_NAVIGATION_INTERVAL_MS = 2_000;
 const FETCH_HTML_TTL_MS = 30_000;
+const BOOK_VIEW_STEP_TIMEOUT_MS = 45_000;
 const htmlFetchCache = new Map<string, {
   fetchedAt: number;
   html?: string;
@@ -72,6 +73,19 @@ function getRandomNavigationInterval(): number {
     MIN_BOOK_VIEW_NAVIGATION_INTERVAL_MS
     + Math.random() * (MAX_BOOK_VIEW_NAVIGATION_INTERVAL_MS - MIN_BOOK_VIEW_NAVIGATION_INTERVAL_MS + 1),
   );
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer!);
+  }
 }
 
 async function fetchWithTimeout(url: RequestInfo | URL, init: RequestInit, timeoutMs: number): Promise<Response> {
@@ -131,13 +145,25 @@ export async function fetchBookPageHtml(url: string): Promise<string> {
       if (waitMs > 0) await Bun.sleep(waitMs);
       lane.lastNavigationAt = Date.now();
 
-      await view.navigate(url);
-      let html = await view.evaluate<string>("document.documentElement.outerHTML");
+      await withTimeout(
+        view.navigate(url),
+        BOOK_VIEW_STEP_TIMEOUT_MS,
+        `页面导航超时（${BOOK_VIEW_STEP_TIMEOUT_MS}ms）: ${url}`,
+      );
+      let html = await withTimeout(
+        view.evaluate<string>("document.documentElement.outerHTML"),
+        BOOK_VIEW_STEP_TIMEOUT_MS,
+        `页面读取超时（${BOOK_VIEW_STEP_TIMEOUT_MS}ms）: ${url}`,
+      );
 
       const deadline = Date.now() + 30_000;
       while (isChallengePage(html) && Date.now() < deadline) {
         await Bun.sleep(1_000);
-        html = await view.evaluate<string>("document.documentElement.outerHTML");
+        html = await withTimeout(
+          view.evaluate<string>("document.documentElement.outerHTML"),
+          BOOK_VIEW_STEP_TIMEOUT_MS,
+          `页面读取超时（${BOOK_VIEW_STEP_TIMEOUT_MS}ms）: ${url}`,
+        );
       }
 
       return html;

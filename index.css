@@ -803,6 +803,12 @@ body {
   margin-bottom: 8px;
 }
 
+.task-current-chapter {
+  font-size: 13px;
+  color: #666;
+  margin-bottom: 8px;
+}
+
 .task-actions {
   display: flex;
   gap: 8px;
