@@ -60,6 +60,7 @@ function getTaskProgress(task: DownloadTask) {
 function DownloadCenter() {
   const [tasks, setTasks] = useState<DownloadTask[]>([]);
   const [loading, setLoading] = useState(true);
+  const [clearing, setClearing] = useState(false);
 
   const fetchTasks = useCallback(() => {
     fetch("/api/download/tasks")
@@ -99,6 +100,21 @@ function DownloadCenter() {
     fetchTasks();
   }, [fetchTasks]);
 
+  const handleClearAll = useCallback(async () => {
+    if (clearing || tasks.length === 0) return;
+    const confirmed = window.confirm("确定要清空全部下载任务吗？");
+    if (!confirmed) return;
+
+    setClearing(true);
+    try {
+      await fetch("/api/download/tasks", { method: "DELETE" });
+      setTasks([]);
+      fetchTasks();
+    } finally {
+      setClearing(false);
+    }
+  }, [clearing, fetchTasks, tasks.length]);
+
   if (loading) {
     return (
       <div className="page download-page">
@@ -110,7 +126,16 @@ function DownloadCenter() {
 
   return (
     <div className="page download-page">
-      <h2>下载中心</h2>
+      <div className="download-page-header">
+        <h2>下载中心</h2>
+        <button
+          className="btn-clear-all"
+          disabled={tasks.length === 0 || clearing}
+          onClick={handleClearAll}
+        >
+          {clearing ? "清空中..." : "清空全部"}
+        </button>
+      </div>
 
       {tasks.length === 0 ? (
         <div className="empty-state">

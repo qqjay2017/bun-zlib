@@ -682,8 +682,16 @@ body {
 }
 
 /* ===== 下载中心样式 ===== */
-.download-page h2 {
+.download-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   margin-bottom: 16px;
+}
+
+.download-page h2 {
+  margin: 0;
 }
 
 .empty-state {
@@ -791,4 +799,26 @@ body {
 .btn-cancel:hover {
   background: #f5222d;
   color: #fff;
+}
+
+.btn-clear-all {
+  padding: 6px 14px;
+  background: #fff;
+  color: #d4380d;
+  border: 1px solid #ffa39e;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.btn-clear-all:hover:not(:disabled) {
+  background: #fff2e8;
+  border-color: #ff7a45;
+  color: #d4380d;
+}
+
+.btn-clear-all:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }

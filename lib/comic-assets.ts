@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { fetchRemoteResponse } from '../backend';
+import { fetchRemoteBytes } from '../backend';
 import {
   listChapterImages,
   saveChapterImage,
@@ -42,16 +42,13 @@ export async function decryptManwapiImage(bytes: Uint8Array): Promise<Uint8Array
 }
 
 export async function fetchManwapiImage(url: string): Promise<Uint8Array> {
-  const res = await fetchRemoteResponse(url);
-  const bytes = new Uint8Array(await res.arrayBuffer());
-  return decryptManwapiImage(bytes);
+  return decryptManwapiImage(await fetchRemoteBytes(url));
 }
 
 async function fetchComicImage(sourceId: string, url: string): Promise<Uint8Array> {
   if (sourceId === 'manwapi') return fetchManwapiImage(url);
 
-  const res = await fetchRemoteResponse(url, 'https://manhuafree.com/');
-  return new Uint8Array(await res.arrayBuffer());
+  return fetchRemoteBytes(url, 'https://manhuafree.com/');
 }
 
 async function normalizeComicChapterContent(

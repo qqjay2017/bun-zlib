@@ -37,6 +37,7 @@ const htmlFetchCache = new Map<string, {
   html?: string;
   promise?: Promise<string>;
 }>();
+const REMOTE_FETCH_TIMEOUT_MS = 30_000;
 
 async function createBookView(): Promise<Bun.WebView> {
   return new Bun.WebView({
@@ -55,6 +56,43 @@ function getRandomNavigationInterval(): number {
     MIN_BOOK_VIEW_NAVIGATION_INTERVAL_MS
     + Math.random() * (MAX_BOOK_VIEW_NAVIGATION_INTERVAL_MS - MIN_BOOK_VIEW_NAVIGATION_INTERVAL_MS + 1),
   );
+}
+
+async function fetchWithTimeout(url: RequestInfo | URL, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(new Error(`Remote request timed out after ${timeoutMs}ms`)), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchRemoteResult<T>(
+  url: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs: number,
+  consume: (res: Response) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(new Error(`Remote request timed out after ${timeoutMs}ms`)), timeoutMs);
+
+  try {
+    const res = await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      throw new Error(`Remote request failed: ${res.status}`);
+    }
+    return await consume(res);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export async function fetchBookPageHtml(url: string): Promise<string> {
@@ -108,17 +146,13 @@ export async function fetchBookPageHtml(url: string): Promise<string> {
 }
 
 export async function fetchRemoteText(url: string): Promise<string> {
-  const res = await fetch(url, {
+  return fetchRemoteResult(url, {
     headers: {
       "Accept": "application/json,text/plain,*/*",
       "User-Agent": "Mozilla/5.0",
       "Referer": new URL(url).origin,
     },
-  });
-  if (!res.ok) {
-    throw new Error(`Remote request failed: ${res.status}`);
-  }
-  return res.text();
+  }, REMOTE_FETCH_TIMEOUT_MS, (res) => res.text());
 }
 
 function getRefererForUrl(url: string): string {
@@ -131,17 +165,27 @@ function getRefererForUrl(url: string): string {
 
 export async function fetchRemoteResponse(url: string, referer = getRefererForUrl(url)): Promise<Response> {
   const target = new URL(url);
-  const res = await fetch(target, {
+  const res = await fetchWithTimeout(target, {
     headers: {
       "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
       "User-Agent": "Mozilla/5.0",
       "Referer": referer,
     },
-  });
+  }, REMOTE_FETCH_TIMEOUT_MS);
   if (!res.ok) {
     throw new Error(`Remote request failed: ${res.status}`);
   }
   return res;
+}
+
+export async function fetchRemoteBytes(url: string, referer = getRefererForUrl(url)): Promise<Uint8Array> {
+  return fetchRemoteResult(url, {
+    headers: {
+      "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+      "User-Agent": "Mozilla/5.0",
+      "Referer": referer,
+    },
+  }, REMOTE_FETCH_TIMEOUT_MS, async (res) => new Uint8Array(await res.arrayBuffer()));
 }
 
 function isChallengePage(html: string): boolean {

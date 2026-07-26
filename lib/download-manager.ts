@@ -107,6 +107,27 @@ class DownloadManager {
     return true;
   }
 
+  async clearTasks(): Promise<number> {
+    const count = this.tasks.size;
+
+    for (const task of this.tasks.values()) {
+      if (task.status !== 'completed' && task.status !== 'failed' && task.status !== 'cancelled') {
+        task.status = 'cancelled';
+        task.updatedAt = Date.now();
+
+        for (const ch of task.chapters) {
+          if (ch.status === 'pending' || ch.status === 'downloading') {
+            ch.status = 'failed';
+          }
+        }
+      }
+    }
+
+    this.tasks.clear();
+    await this.persist();
+    return count;
+  }
+
   getTasks(): DownloadTask[] {
     return [...this.tasks.values()].sort((a, b) => b.createdAt - a.createdAt);
   }
@@ -287,6 +308,8 @@ class DownloadManager {
   }
 
   private notifyListeners(task: DownloadTask): void {
+    if (!this.tasks.has(task.taskId)) return;
+
     for (const fn of this.listeners) {
       try {
         fn(task);

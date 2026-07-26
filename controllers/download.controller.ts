@@ -16,6 +16,11 @@ defineController("/api/download", {
     return Response.json({ success: true, data: downloadManager.getTasks() });
   },
 
+  "DELETE /tasks": async () => {
+    const count = await downloadManager.clearTasks();
+    return Response.json({ success: true, data: { cleared: count } });
+  },
+
   "GET /epub/:type/:sourceId/:bookId": async (_req, params) => {
     const { type, sourceId, bookId } = params;
     const contentType = type as ContentType;
