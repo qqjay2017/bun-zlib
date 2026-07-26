@@ -10,12 +10,18 @@ const ALLOWED_IMAGE_HOSTS = new Set([
   "mwtusan.cc",
   "mwtusi.cc",
   "mg.mwre.cc",
+  "c-nd2-1.6wm.top",
+  "c-nd3-1.6wm.top",
+  "t-nd2-1.6wm.top",
+  "t-nd3-1.6wm.top",
+  "c-nc-1.6wm.top",
 ]);
 
 function isAllowedImageUrl(url: string): boolean {
   try {
     const target = new URL(url);
-    return target.protocol === "https:" && ALLOWED_IMAGE_HOSTS.has(target.hostname);
+    return target.protocol === "https:"
+      && (ALLOWED_IMAGE_HOSTS.has(target.hostname) || target.hostname.endsWith(".g-mh.online"));
   } catch {
     return false;
   }

@@ -121,13 +121,21 @@ export async function fetchRemoteText(url: string): Promise<string> {
   return res.text();
 }
 
-export async function fetchRemoteResponse(url: string): Promise<Response> {
+function getRefererForUrl(url: string): string {
+  const hostname = new URL(url).hostname;
+  if (hostname.endsWith("1.6wm.top") || hostname.endsWith("g-mh.online")) {
+    return "https://manhuafree.com/";
+  }
+  return "https://manwapi.cc/";
+}
+
+export async function fetchRemoteResponse(url: string, referer = getRefererForUrl(url)): Promise<Response> {
   const target = new URL(url);
   const res = await fetch(target, {
     headers: {
       "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
       "User-Agent": "Mozilla/5.0",
-      "Referer": "https://manwapi.cc/",
+      "Referer": referer,
     },
   });
   if (!res.ok) {

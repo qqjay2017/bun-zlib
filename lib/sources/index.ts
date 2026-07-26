@@ -5,3 +5,4 @@
 export { source69shuba } from './69shuba';
 export { sourceHaitu } from './haitu';
 export { sourceManwapi } from './manwapi';
+export { sourceManhuafree } from './manhuafree';

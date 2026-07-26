@@ -3,6 +3,7 @@ import { createRoute, Outlet, useMatches } from "@tanstack/react-router";
 import { useNavigate } from "@tanstack/react-router";
 import { rootRoute } from "./__root";
 import { sourceManwapi } from "../lib/sources/manwapi";
+import { sourceManhuafree } from "../lib/sources/manhuafree";
 
 export const comicRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -24,6 +25,7 @@ function ComicPage() {
 
 const COMIC_SOURCES = [
   { id: "manwapi", name: "漫蛙漫画", domain: "https://manwapi.cc" },
+  { id: "manhuafree", name: "G社漫画/包子漫画", domain: "https://manhuafree.com" },
 ];
 
 function ComicSearchPage() {
@@ -38,7 +40,8 @@ function ComicSearchPage() {
     const comicUrl = url.trim();
     if (!comicUrl) return;
 
-    const bookId = sourceManwapi.getBookId(comicUrl);
+    const source = selectedSource === "manhuafree" ? sourceManhuafree : sourceManwapi;
+    const bookId = source.getBookId(comicUrl);
     if (!bookId) {
       setError("无法从 URL 识别漫画 ID");
       return;
@@ -77,7 +80,7 @@ function ComicSearchPage() {
           type="text"
           value={url}
           onChange={(event) => setUrl(event.target.value)}
-          placeholder="请输入漫画详情页地址，如 https://manwapi.cc/comic/3340"
+          placeholder="请输入漫画详情页地址，如 https://manhuafree.com/manga/diqiujintou-qiduyu"
         />
         <button onClick={handleFetch} disabled={!url.trim()}>
           跳转

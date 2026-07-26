@@ -3,6 +3,8 @@ import { createRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { comicDetailRoute } from "./comic-detail";
 import { getManwapiImageApiUrl, sourceManwapi } from "../lib/sources/manwapi";
+import { sourceManhuafree } from "../lib/sources/manhuafree";
+import type { BookSourceConfig } from "../lib/source-config";
 import type { ChapterMetadata } from "../lib/cache-types";
 
 export const comicReaderRoute = createRoute({
@@ -53,6 +55,16 @@ async function getChapterList(sourceId: string, bookId: string): Promise<Chapter
   return cached.chapters;
 }
 
+function getComicSource(sourceId: string): BookSourceConfig {
+  if (sourceId === "manhuafree") return sourceManhuafree;
+  return sourceManwapi;
+}
+
+function getChapterContentUrl(sourceId: string, chapter: ChapterMetadata): string {
+  if (sourceId === "manwapi") return getManwapiImageApiUrl(chapter.chapterId);
+  return chapter.chapterDetailUrl;
+}
+
 async function getChapter(
   sourceId: string,
   bookId: string,
@@ -62,8 +74,9 @@ async function getChapter(
   const cached = await readCache<ChapterMetadata>(cacheUrl);
   if (cached?.content) return cached;
 
-  const jsonText = await fetchText(getManwapiImageApiUrl(chapter.chapterId));
-  const extracted = sourceManwapi.extractors.extractContent(jsonText);
+  const source = getComicSource(sourceId);
+  const jsonText = await fetchText(getChapterContentUrl(sourceId, chapter));
+  const extracted = source.extractors.extractContent(jsonText);
   if (!extracted?.content) throw new Error("漫画图片解析失败");
 
   const nextChapter = {

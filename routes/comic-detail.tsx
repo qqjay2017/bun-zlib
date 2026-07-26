@@ -3,6 +3,8 @@ import { createRoute, Link, Outlet, useMatches } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { comicRoute } from "./comic";
 import { sourceManwapi } from "../lib/sources/manwapi";
+import { sourceManhuafree } from "../lib/sources/manhuafree";
+import type { BookSourceConfig } from "../lib/source-config";
 import type { BookMetadata, ChapterMetadata } from "../lib/cache-types";
 
 export const comicDetailRoute = createRoute({
@@ -45,8 +47,15 @@ type ExportJob = {
 
 const COMIC_SHELF_KEY = "bookshelf:comic";
 
-function getDetailUrl(bookId: string): string {
-  return `${sourceManwapi.domain}/comic/${bookId}`;
+function getComicSource(sourceId: string): BookSourceConfig {
+  if (sourceId === "manhuafree") return sourceManhuafree;
+  return sourceManwapi;
+}
+
+function getComicDetailUrl(sourceId: string, bookId: string): string {
+  const source = getComicSource(sourceId);
+  if (source.sourceId === "manhuafree") return `${source.domain}/manga/${bookId}`;
+  return `${source.domain}/comic/${bookId}`;
 }
 
 async function fetchHtml(url: string): Promise<string> {
@@ -149,9 +158,10 @@ async function getComic(sourceId: string, bookId: string): Promise<BookMetadata>
 
 async function fetchComicFromSource(sourceId: string, bookId: string): Promise<BookMetadata> {
   const cacheUrl = `/api/cache/comic/${sourceId}/${bookId}/metadata`;
-  const detailUrl = getDetailUrl(bookId);
+  const detailUrl = getComicDetailUrl(sourceId, bookId);
+  const source = getComicSource(sourceId);
   const html = await fetchHtml(detailUrl);
-  const parsed = sourceManwapi.extractors.getBookMetadata(parseHtml(html, detailUrl));
+  const parsed = source.extractors.getBookMetadata(parseHtml(html, detailUrl));
   if (!parsed) throw new Error("漫画详情页解析失败");
 
   const comic: Omit<BookMetadata, "cachedAt"> = {
@@ -167,8 +177,11 @@ async function fetchComicFromSource(sourceId: string, bookId: string): Promise<B
 
 async function fetchChaptersFromSource(sourceId: string, bookId: string, detailUrl: string): Promise<ChapterMetadata[]> {
   const cacheUrl = `/api/cache/comic/${sourceId}/${bookId}/chapter-list`;
-  const html = await fetchHtml(detailUrl || getDetailUrl(bookId));
-  const chapters: ChapterItem[] = sourceManwapi.extractors.getChapterList(parseHtml(html, detailUrl || getDetailUrl(bookId)));
+  const source = getComicSource(sourceId);
+  const nextDetailUrl = detailUrl || getComicDetailUrl(sourceId, bookId);
+  const tocUrl = source.getTocUrl?.(nextDetailUrl, bookId) ?? nextDetailUrl;
+  const html = await fetchHtml(tocUrl);
+  const chapters: ChapterItem[] = source.extractors.getChapterList(parseHtml(html, tocUrl));
   if (!chapters.length) throw new Error("漫画目录解析失败");
 
   await writeCache(cacheUrl, chapters);
@@ -225,7 +238,7 @@ function ComicDetailContent() {
     mutationFn: () => fetchChaptersFromSource(
       sourceId,
       bookId,
-      comicQuery.data?.detailPageUrl ?? getDetailUrl(bookId),
+      comicQuery.data?.detailPageUrl ?? getComicDetailUrl(sourceId, bookId),
     ),
     onSuccess: (chapters) => {
       queryClient.setQueryData(["comic", sourceId, bookId, "chapters"], chapters);

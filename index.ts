@@ -6,6 +6,7 @@ import "./controllers/book.controller";
 import "./controllers/download.controller";
 import "./controllers/cache.controller";
 import "./controllers/source.controller";
+import "./controllers/history.controller";
 
 // 触发源注册
 import "./lib/sources";

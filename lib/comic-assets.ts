@@ -45,6 +45,13 @@ export async function fetchManwapiImage(url: string): Promise<Uint8Array> {
   return decryptManwapiImage(bytes);
 }
 
+async function fetchComicImage(sourceId: string, url: string): Promise<Uint8Array> {
+  if (sourceId === 'manwapi') return fetchManwapiImage(url);
+
+  const res = await fetchRemoteResponse(url, 'https://manhuafree.com/');
+  return new Uint8Array(await res.arrayBuffer());
+}
+
 export function cachedImageApiUrl(
   sourceId: string,
   bookId: string,
@@ -67,7 +74,9 @@ export async function cacheComicChapterImages(
   bookId: string,
   chapter: ChapterMetadata,
 ): Promise<CachedImageFile[]> {
-  if (sourceId !== 'manwapi') throw new Error(`暂不支持缓存该漫画源图片: ${sourceId}`);
+  if (sourceId !== 'manwapi' && sourceId !== 'manhuafree') {
+    throw new Error(`暂不支持缓存该漫画源图片: ${sourceId}`);
+  }
 
   const cached = await getCachedComicChapterImages(sourceId, bookId, chapter.chapterId);
   const urls = getChapterImageUrls(chapter);
@@ -81,7 +90,7 @@ export async function cacheComicChapterImages(
       continue;
     }
 
-    const image = await fetchManwapiImage(urls[i]!);
+    const image = await fetchComicImage(sourceId, urls[i]!);
     const filename = `${String(i + 1).padStart(3, '0')}.${imageExt(image)}`;
     const filePath = await saveChapterImage('comic', sourceId, bookId, chapter.chapterId, filename, image);
     files.push({ filename, path: filePath });
