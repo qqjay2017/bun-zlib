@@ -1,5 +1,4 @@
-import path from 'node:path';
-import { mkdir } from 'node:fs/promises';
+import { getDb } from './db';
 import type { ContentType } from './cache-types';
 
 export interface VisitHistoryItem {
@@ -13,38 +12,68 @@ export interface VisitHistoryItem {
   visitedAt: number;
 }
 
-const HISTORY_FILE = path.resolve(process.cwd(), '.cache', 'visit-history.json');
-
-async function readAll(): Promise<VisitHistoryItem[]> {
-  try {
-    return JSON.parse(await Bun.file(HISTORY_FILE).text()) as VisitHistoryItem[];
-  } catch {
-    return [];
-  }
+interface VisitHistoryRow {
+  type: ContentType;
+  source_id: string;
+  book_id: string;
+  book_name: string;
+  chapter_id: string | null;
+  chapter_name: string | null;
+  path: string;
+  visited_at: number;
 }
 
-async function writeAll(items: VisitHistoryItem[]): Promise<void> {
-  await mkdir(path.dirname(HISTORY_FILE), { recursive: true });
-  await Bun.write(HISTORY_FILE, JSON.stringify(items, null, 2));
+const MAX_HISTORY_ITEMS = 50;
+
+function rowToItem(row: VisitHistoryRow): VisitHistoryItem {
+  return {
+    type: row.type,
+    sourceId: row.source_id,
+    bookId: row.book_id,
+    bookName: row.book_name,
+    chapterId: row.chapter_id ?? undefined,
+    chapterName: row.chapter_name ?? undefined,
+    path: row.path,
+    visitedAt: row.visited_at,
+  };
 }
 
 export async function listVisitHistory(type?: ContentType): Promise<VisitHistoryItem[]> {
-  const items = await readAll();
-  const sorted = items.sort((a, b) => b.visitedAt - a.visitedAt);
-  return type ? sorted.filter((item) => item.type === type) : sorted;
+  const db = getDb();
+  const rows = (
+    type
+      ? db.query('SELECT * FROM visit_history WHERE type = ? ORDER BY visited_at DESC').all(type)
+      : db.query('SELECT * FROM visit_history ORDER BY visited_at DESC').all()
+  ) as VisitHistoryRow[];
+  return rows.map(rowToItem);
 }
 
 export async function saveVisitHistory(item: VisitHistoryItem): Promise<void> {
-  const items = await readAll();
-  const next = [
-    item,
-    ...items.filter((entry) => !(
-      entry.type === item.type
-      && entry.sourceId === item.sourceId
-      && entry.bookId === item.bookId
-      && entry.chapterId === item.chapterId
-      && entry.path === item.path
-    )),
-  ];
-  await writeAll(next.slice(0, 50));
+  const db = getDb();
+
+  db.transaction(() => {
+    db.query(`
+      DELETE FROM visit_history
+      WHERE type = ? AND source_id = ? AND book_id = ? AND path = ? AND chapter_id IS ?
+    `).run(item.type, item.sourceId, item.bookId, item.path, item.chapterId ?? null);
+
+    db.query(`
+      INSERT INTO visit_history (type, source_id, book_id, book_name, chapter_id, chapter_name, path, visited_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      item.type,
+      item.sourceId,
+      item.bookId,
+      item.bookName,
+      item.chapterId ?? null,
+      item.chapterName ?? null,
+      item.path,
+      item.visitedAt,
+    );
+
+    db.query(`
+      DELETE FROM visit_history
+      WHERE id NOT IN (SELECT id FROM visit_history ORDER BY visited_at DESC LIMIT ?)
+    `).run(MAX_HISTORY_ITEMS);
+  })();
 }

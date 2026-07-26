@@ -88,9 +88,9 @@ export function getDb(): Database {
 
   mkdirSync(getCacheRoot(), { recursive: true });
   db = new Database(path.join(getCacheRoot(), 'data.sqlite'));
-  db.exec('PRAGMA journal_mode = WAL;');
-  db.exec('PRAGMA foreign_keys = ON;');
-  db.exec(SCHEMA);
+  db.run('PRAGMA journal_mode = WAL;');
+  db.run('PRAGMA foreign_keys = ON;');
+  db.run(SCHEMA);
 
   return db;
 }

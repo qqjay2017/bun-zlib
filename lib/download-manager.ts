@@ -1,15 +1,15 @@
-import path from 'node:path';
-import { readFileSync } from 'node:fs';
-import { mkdir } from 'node:fs/promises';
 import type {
   DownloadTask,
   CreateDownloadRequest,
   ChapterDownloadItem,
   ProgressListener,
   TaskProgress,
+  TaskStatus,
 } from './download-types';
 import { fetchPageHtml, fetchRemoteText } from '../backend';
-import { loadChapter, saveChapter, getCacheRoot } from './cache-manager';
+import { loadChapter, saveChapter } from './cache-manager';
+import { getDb } from './db';
+import type { ContentType } from './cache-types';
 import { getSourceById } from './source-config';
 import { getManwapiImageApiUrl } from './sources/manwapi';
 import { cacheComicChapterImages } from './comic-assets';
@@ -19,7 +19,13 @@ import { cacheComicChapterImages } from './comic-assets';
 // ============================================================
 
 const MAX_CONCURRENCY = 4;
+const HTTP_ONLY_SOURCES = new Set(['manwapi']);
 const CHAPTER_DELAY_MS = 2_000;
+const HTTP_ONLY_CHAPTER_DELAY_MS = 0;
+
+function getChapterDelayMs(sourceId: string): number {
+  return HTTP_ONLY_SOURCES.has(sourceId) ? HTTP_ONLY_CHAPTER_DELAY_MS : CHAPTER_DELAY_MS;
+}
 
 class CloudflareChallengeError extends Error {
   constructor() {
@@ -32,8 +38,32 @@ function isChallengePage(html: string): boolean {
   return /Just a moment|请稍候|正在进行安全验证|cf-turnstile|challenges\.cloudflare\.com/i.test(html);
 }
 
-function getTasksFilePath(): string {
-  return path.join(getCacheRoot(), 'downloads', 'tasks.json');
+// ============================================================
+// 持久化行类型
+// ============================================================
+
+interface DownloadTaskRow {
+  task_id: string;
+  source_id: string;
+  book_id: string;
+  content_type: string;
+  status: string;
+  total: number;
+  completed: number;
+  failed: number;
+  percent: number;
+  error: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+interface DownloadTaskChapterRow {
+  task_id: string;
+  seq: number;
+  chapter_id: string;
+  chapter_name: string;
+  chapter_detail_url: string;
+  status: string;
 }
 
 // ============================================================
@@ -82,7 +112,8 @@ class DownloadManager {
     };
 
     this.tasks.set(taskId, task);
-    this.persist();
+    this.persistTaskHeader(task);
+    this.insertTaskChapters(task);
     this.processNext();
 
     return task;
@@ -99,11 +130,12 @@ class DownloadManager {
     for (const ch of task.chapters) {
       if (ch.status === 'pending' || ch.status === 'downloading') {
         ch.status = 'failed';
+        this.persistChapterStatus(taskId, ch.chapterId, ch.status);
       }
     }
 
     this.notifyListeners(task);
-    this.persist();
+    this.persistTaskHeader(task);
     return true;
   }
 
@@ -124,7 +156,7 @@ class DownloadManager {
     }
 
     this.tasks.clear();
-    await this.persist();
+    getDb().run('DELETE FROM download_tasks');
     return count;
   }
 
@@ -165,6 +197,7 @@ class DownloadManager {
       }
 
       nextChapter.status = 'downloading';
+      this.persistChapterStatus(task.taskId, nextChapter.chapterId, nextChapter.status);
       this.activeCount++;
       this.executeChapter(task, nextChapter);
 
@@ -191,6 +224,7 @@ class DownloadManager {
           await cacheComicChapterImages(task.sourceId, task.bookId, existing);
         }
         chapter.status = 'completed';
+        this.persistChapterStatus(task.taskId, chapter.chapterId, chapter.status);
         task.progress.completed++;
         this.updateProgress(task);
         this.notifyListeners(task);
@@ -250,11 +284,12 @@ class DownloadManager {
       console.error(`[DownloadManager] 章节下载失败: ${chapter.chapterName}`, err);
     }
 
+    this.persistChapterStatus(task.taskId, chapter.chapterId, chapter.status);
     this.updateProgress(task);
     this.notifyListeners(task);
 
-    // 章节间延迟防止限频
-    await Bun.sleep(CHAPTER_DELAY_MS);
+    // 章节间延迟防止限频（仅对经过 WebView 池的来源生效，HTTP-only 来源无需等待）
+    await Bun.sleep(getChapterDelayMs(task.sourceId));
 
     this.afterChapterDone(task);
   }
@@ -275,9 +310,9 @@ class DownloadManager {
       }
       task.updatedAt = Date.now();
       this.notifyListeners(task);
-      this.persist();
+      this.persistTaskHeader(task);
     } else if (task.status !== 'cancelled') {
-      this.persist();
+      this.persistTaskHeader(task);
     }
 
     // 调度下一个
@@ -323,37 +358,116 @@ class DownloadManager {
   // 持久化
   // ----------------------------------------------------------
 
-  private async persist(): Promise<void> {
-    try {
-      const filePath = getTasksFilePath();
-      await mkdir(path.dirname(filePath), { recursive: true });
-      const data = JSON.stringify([...this.tasks.values()], null, 2);
-      await Bun.write(filePath, data);
-    } catch (err) {
-      console.error('[DownloadManager] 持久化失败:', err);
-    }
+  private persistTaskHeader(task: DownloadTask): void {
+    if (!this.tasks.has(task.taskId)) return;
+
+    getDb().query(`
+      INSERT INTO download_tasks (task_id, source_id, book_id, content_type, status, total, completed, failed, percent, error, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (task_id) DO UPDATE SET
+        status = excluded.status,
+        total = excluded.total,
+        completed = excluded.completed,
+        failed = excluded.failed,
+        percent = excluded.percent,
+        error = excluded.error,
+        updated_at = excluded.updated_at
+    `).run(
+      task.taskId,
+      task.sourceId,
+      task.bookId,
+      task.contentType,
+      task.status,
+      task.progress.total,
+      task.progress.completed,
+      task.progress.failed,
+      task.progress.percent,
+      task.error ?? null,
+      task.createdAt,
+      task.updatedAt,
+    );
+  }
+
+  private insertTaskChapters(task: DownloadTask): void {
+    const db = getDb();
+    const insertChapter = db.query(`
+      INSERT INTO download_task_chapters (task_id, seq, chapter_id, chapter_name, chapter_detail_url, status)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT (task_id, chapter_id) DO UPDATE SET
+        seq = excluded.seq,
+        chapter_name = excluded.chapter_name,
+        chapter_detail_url = excluded.chapter_detail_url,
+        status = excluded.status
+    `);
+
+    db.transaction(() => {
+      task.chapters.forEach((chapter, seq) => {
+        insertChapter.run(task.taskId, seq, chapter.chapterId, chapter.chapterName, chapter.chapterDetailUrl, chapter.status);
+      });
+    })();
+  }
+
+  private persistChapterStatus(taskId: string, chapterId: string, status: ChapterDownloadItem['status']): void {
+    if (!this.tasks.has(taskId)) return;
+
+    getDb().query(`
+      UPDATE download_task_chapters SET status = ? WHERE task_id = ? AND chapter_id = ?
+    `).run(status, taskId, chapterId);
   }
 
   private restore(): void {
-    try {
-      const filePath = getTasksFilePath();
-      const json = readFileSync(filePath, 'utf-8');
-      const tasks: DownloadTask[] = JSON.parse(json);
+    const db = getDb();
+    const taskRows = db.query('SELECT * FROM download_tasks').all() as DownloadTaskRow[];
+    const chapterRows = db
+      .query('SELECT * FROM download_task_chapters ORDER BY task_id ASC, seq ASC')
+      .all() as DownloadTaskChapterRow[];
 
-      for (const task of tasks) {
-        if (task.status === 'downloading' || task.status === 'pending') {
-          task.status = 'cancelled';
-          task.error = '服务重启后已停止未完成的缓存任务，请手动重新开始。';
-          for (const ch of task.chapters) {
-            if (ch.status === 'downloading' || ch.status === 'pending') {
-              ch.status = 'failed';
-            }
+    const chaptersByTask = new Map<string, ChapterDownloadItem[]>();
+    for (const row of chapterRows) {
+      const list = chaptersByTask.get(row.task_id) ?? [];
+      list.push({
+        chapterId: row.chapter_id,
+        chapterName: row.chapter_name,
+        chapterDetailUrl: row.chapter_detail_url,
+        status: row.status as ChapterDownloadItem['status'],
+      });
+      chaptersByTask.set(row.task_id, list);
+    }
+
+    for (const row of taskRows) {
+      const task: DownloadTask = {
+        taskId: row.task_id,
+        sourceId: row.source_id,
+        bookId: row.book_id,
+        contentType: row.content_type as ContentType,
+        chapters: chaptersByTask.get(row.task_id) ?? [],
+        status: row.status as TaskStatus,
+        progress: {
+          total: row.total,
+          completed: row.completed,
+          failed: row.failed,
+          percent: row.percent,
+        },
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        error: row.error ?? undefined,
+      };
+
+      this.tasks.set(task.taskId, task);
+
+      if (task.status === 'downloading' || task.status === 'pending') {
+        task.status = 'cancelled';
+        task.error = '服务重启后已停止未完成的缓存任务，请手动重新开始。';
+
+        for (const ch of task.chapters) {
+          if (ch.status === 'downloading' || ch.status === 'pending') {
+            ch.status = 'failed';
+            this.persistChapterStatus(task.taskId, ch.chapterId, ch.status);
           }
         }
-        this.tasks.set(task.taskId, task);
+
+        this.persistTaskHeader(task);
       }
-    } catch {
-      // 文件不存在或解析失败，忽略
     }
   }
 }
