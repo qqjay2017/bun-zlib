@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { createRoute, Link, Outlet, useMatches } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { comicRoute } from "./comic";
 import { sourceManwapi } from "../lib/sources/manwapi";
 import { sourceManhuafree } from "../lib/sources/manhuafree";
 import { getLatestVisit } from "../lib/history-api";
+import { addBookToShelf, isBookInShelf } from "../lib/bookshelf-api";
 import type { BookSourceConfig } from "../lib/source-config";
 import type { BookMetadata, ChapterMetadata } from "../lib/cache-types";
 
@@ -21,20 +22,6 @@ type ApiResult<T> = {
 };
 
 type ChapterItem = Omit<ChapterMetadata, "cachedAt">;
-type ShelfBook = Pick<
-  BookMetadata,
-  | "bookId"
-  | "sourceId"
-  | "contentType"
-  | "name"
-  | "author"
-  | "coverImageUrl"
-  | "description"
-  | "detailPageUrl"
-> & {
-  addedAt: number;
-};
-
 type ExportResult = {
   outputDir: string;
   files: Array<{ path: string; filename: string; size: number }>;
@@ -45,8 +32,6 @@ type ExportJob = {
   result?: ExportResult;
   error?: string;
 };
-
-const COMIC_SHELF_KEY = "bookshelf:comic";
 
 function getComicSource(sourceId: string): BookSourceConfig {
   if (sourceId === "manhuafree") return sourceManhuafree;
@@ -107,39 +92,6 @@ async function waitForExportJob(jobId: string): Promise<ExportResult> {
 
     await new Promise((resolve) => setTimeout(resolve, 1500));
   }
-}
-
-function readShelfBooks(): ShelfBook[] {
-  try {
-    const raw = localStorage.getItem(COMIC_SHELF_KEY);
-    return raw ? JSON.parse(raw) as ShelfBook[] : [];
-  } catch {
-    return [];
-  }
-}
-
-function isBookInShelf(sourceId: string, bookId: string): boolean {
-  return readShelfBooks().some((book) => book.sourceId === sourceId && book.bookId === bookId);
-}
-
-function addBookToShelf(book: BookMetadata): void {
-  const books = readShelfBooks();
-  const nextBook: ShelfBook = {
-    bookId: book.bookId,
-    sourceId: book.sourceId,
-    contentType: book.contentType,
-    name: book.name,
-    author: book.author,
-    coverImageUrl: book.coverImageUrl,
-    description: book.description,
-    detailPageUrl: book.detailPageUrl,
-    addedAt: Date.now(),
-  };
-  const nextBooks = [
-    nextBook,
-    ...books.filter((item) => item.sourceId !== book.sourceId || item.bookId !== book.bookId),
-  ];
-  localStorage.setItem(COMIC_SHELF_KEY, JSON.stringify(nextBooks));
 }
 
 function parseHtml(html: string, url: string): Document {
@@ -212,7 +164,6 @@ function ComicDetailLayout() {
 function ComicDetailContent() {
   const { sourceId, bookId } = comicDetailRoute.useParams();
   const queryClient = useQueryClient();
-  const [inShelf, setInShelf] = useState(false);
   const [exportResult, setExportResult] = useState<ExportResult | null>(null);
 
   const comicQuery = useQuery({
@@ -232,6 +183,11 @@ function ComicDetailContent() {
     queryKey: ["history", "comic", sourceId, bookId, "latest"],
     queryFn: () => getLatestVisit("comic", sourceId, bookId),
     staleTime: 10_000,
+  });
+
+  const shelfQuery = useQuery({
+    queryKey: ["bookshelf", "comic", sourceId, bookId],
+    queryFn: () => isBookInShelf("comic", sourceId, bookId),
   });
 
   const refreshDetailMutation = useMutation({
@@ -283,25 +239,36 @@ function ComicDetailContent() {
   });
 
   const comic = comicQuery.data;
+  const addShelfMutation = useMutation({
+    mutationFn: async () => {
+      if (!comic) throw new Error("漫画详情尚未加载完成");
+      return addBookToShelf(comic);
+    },
+    onSuccess: () => {
+      queryClient.setQueryData(
+        ["bookshelf", "comic", sourceId, bookId],
+        true,
+      );
+      void queryClient.invalidateQueries({ queryKey: ["bookshelf"] });
+    },
+  });
   const chapters = chapterQuery.data ?? [];
   const firstChapter = chapters[0];
   const continueChapterId = latestVisitQuery.data?.chapterId;
   const continueChapterName = latestVisitQuery.data?.chapterName;
+  const inShelf = shelfQuery.data ?? false;
   const error = comicQuery.error
     || chapterQuery.error
+    || shelfQuery.error
     || refreshDetailMutation.error
     || refreshChaptersMutation.error
     || downloadMutation.error
+    || addShelfMutation.error
     || exportMutation.error;
-
-  useEffect(() => {
-    if (comic) setInShelf(isBookInShelf(sourceId, bookId));
-  }, [bookId, comic, sourceId]);
 
   const handleAddShelf = () => {
     if (!comic) return;
-    addBookToShelf(comic);
-    setInShelf(true);
+    addShelfMutation.mutate();
   };
 
   return (
@@ -350,10 +317,14 @@ function ComicDetailContent() {
                 )}
                 <button
                   className="btn-secondary"
-                  disabled={inShelf}
+                  disabled={inShelf || addShelfMutation.isPending}
                   onClick={handleAddShelf}
                 >
-                  {inShelf ? "已在书架" : "添加书架"}
+                  {inShelf
+                    ? "已在书架"
+                    : addShelfMutation.isPending
+                      ? "添加中..."
+                      : "添加书架"}
                 </button>
                 <button
                   className="btn-secondary"

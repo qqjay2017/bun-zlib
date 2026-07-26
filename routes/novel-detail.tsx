@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { novelRoute } from "./novel";
 import { source69shuba } from "../lib/sources/69shuba";
 import { saveVisitHistory } from "../lib/history-api";
+import { addBookToShelf, isBookInShelf } from "../lib/bookshelf-api";
 import { normalizeChapterOrder } from "../lib/chapter-order";
 import { DownloadCenterModal } from "../components/download-center-modal";
 import type { BookMetadata, ChapterMetadata } from "../lib/cache-types";
@@ -25,22 +26,6 @@ type ExportResult = {
   outputDir: string;
   files: Array<{ path: string; filename: string; size: number }>;
 };
-type ShelfBook = Pick<
-  BookMetadata,
-  | "bookId"
-  | "sourceId"
-  | "contentType"
-  | "name"
-  | "author"
-  | "coverImageUrl"
-  | "description"
-  | "detailPageUrl"
-> & {
-  addedAt: number;
-};
-
-const NOVEL_SHELF_KEY = "bookshelf:novel";
-
 function getDetailUrl(bookId: string): string {
   return `${source69shuba.domain}/book/${bookId}.htm`;
 }
@@ -142,39 +127,6 @@ async function getChapters(
   return fetchChaptersFromSource(sourceId, bookId, detailUrl);
 }
 
-function readShelfBooks(): ShelfBook[] {
-  try {
-    const raw = localStorage.getItem(NOVEL_SHELF_KEY);
-    return raw ? JSON.parse(raw) as ShelfBook[] : [];
-  } catch {
-    return [];
-  }
-}
-
-function isBookInShelf(sourceId: string, bookId: string): boolean {
-  return readShelfBooks().some((book) => book.sourceId === sourceId && book.bookId === bookId);
-}
-
-function addBookToShelf(book: BookMetadata): void {
-  const books = readShelfBooks();
-  const nextBook: ShelfBook = {
-    bookId: book.bookId,
-    sourceId: book.sourceId,
-    contentType: book.contentType,
-    name: book.name,
-    author: book.author,
-    coverImageUrl: book.coverImageUrl,
-    description: book.description,
-    detailPageUrl: book.detailPageUrl,
-    addedAt: Date.now(),
-  };
-  const nextBooks = [
-    nextBook,
-    ...books.filter((item) => item.sourceId !== book.sourceId || item.bookId !== book.bookId),
-  ];
-  localStorage.setItem(NOVEL_SHELF_KEY, JSON.stringify(nextBooks));
-}
-
 function NovelDetailLayout() {
   const matches = useMatches();
   const showDefault = matches.length === 3;
@@ -190,7 +142,6 @@ function NovelDetailLayout() {
 function NovelDetailContent() {
   const { sourceId, bookId } = novelDetailRoute.useParams();
   const queryClient = useQueryClient();
-  const [inShelf, setInShelf] = useState(false);
   const [exportResult, setExportResult] = useState<ExportResult | null>(null);
   const [downloadCenterOpen, setDownloadCenterOpen] = useState(false);
 
@@ -209,11 +160,24 @@ function NovelDetailContent() {
 
   const book = bookQuery.data;
 
-  useEffect(() => {
-    if (bookQuery.data) {
-      setInShelf(isBookInShelf(sourceId, bookId));
-    }
-  }, [bookId, bookQuery.data, sourceId]);
+  const shelfQuery = useQuery({
+    queryKey: ["bookshelf", "novel", sourceId, bookId],
+    queryFn: () => isBookInShelf("novel", sourceId, bookId),
+  });
+
+  const addShelfMutation = useMutation({
+    mutationFn: async () => {
+      if (!book) throw new Error("书籍详情尚未加载完成");
+      return addBookToShelf(book);
+    },
+    onSuccess: () => {
+      queryClient.setQueryData(
+        ["bookshelf", "novel", sourceId, bookId],
+        true,
+      );
+      void queryClient.invalidateQueries({ queryKey: ["bookshelf"] });
+    },
+  });
 
   useEffect(() => {
     if (!book) return;
@@ -231,7 +195,6 @@ function NovelDetailContent() {
     mutationFn: () => fetchBookFromSource(sourceId, bookId),
     onSuccess: (book) => {
       queryClient.setQueryData(["novel", sourceId, bookId, "metadata"], book);
-      setInShelf(isBookInShelf(sourceId, bookId));
     },
   });
 
@@ -278,17 +241,19 @@ function NovelDetailContent() {
 
   const chapters = chapterQuery.data ?? [];
   const firstChapter = chapters[0];
+  const inShelf = shelfQuery.data ?? false;
   const error = bookQuery.error
     || chapterQuery.error
+    || shelfQuery.error
     || refreshDetailMutation.error
     || refreshChaptersMutation.error
     || downloadMutation.error
+    || addShelfMutation.error
     || exportMutation.error;
 
   const handleAddShelf = () => {
     if (!book) return;
-    addBookToShelf(book);
-    setInShelf(true);
+    addShelfMutation.mutate();
   };
 
   return (
@@ -328,10 +293,14 @@ function NovelDetailContent() {
                 )}
                 <button
                   className="btn-secondary"
-                  disabled={inShelf}
+                  disabled={inShelf || addShelfMutation.isPending}
                   onClick={handleAddShelf}
                 >
-                  {inShelf ? "已在书架" : "添加书架"}
+                  {inShelf
+                    ? "已在书架"
+                    : addShelfMutation.isPending
+                      ? "添加中..."
+                      : "添加书架"}
                 </button>
                 <button
                   className="btn-secondary"

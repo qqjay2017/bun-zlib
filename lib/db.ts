@@ -38,6 +38,18 @@ CREATE TABLE IF NOT EXISTS chapters (
 CREATE INDEX IF NOT EXISTS idx_chapters_book_order
   ON chapters (content_type, source_id, book_id, chapter_index);
 
+CREATE TABLE IF NOT EXISTS bookshelf (
+  content_type TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  book_id TEXT NOT NULL,
+  added_at INTEGER NOT NULL,
+  PRIMARY KEY (content_type, source_id, book_id),
+  FOREIGN KEY (content_type, source_id, book_id)
+    REFERENCES books (content_type, source_id, book_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_bookshelf_added
+  ON bookshelf (added_at DESC);
+
 CREATE TABLE IF NOT EXISTS visit_history (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   type TEXT NOT NULL,
@@ -51,6 +63,20 @@ CREATE TABLE IF NOT EXISTS visit_history (
 );
 CREATE INDEX IF NOT EXISTS idx_visit_history_type_visited
   ON visit_history (type, visited_at DESC);
+DELETE FROM visit_history
+WHERE EXISTS (
+  SELECT 1
+  FROM visit_history AS newer
+  WHERE newer.type = visit_history.type
+    AND newer.source_id = visit_history.source_id
+    AND newer.book_id = visit_history.book_id
+    AND (
+      newer.visited_at > visit_history.visited_at
+      OR (newer.visited_at = visit_history.visited_at AND newer.id > visit_history.id)
+    )
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_visit_history_book
+  ON visit_history (type, source_id, book_id);
 
 CREATE TABLE IF NOT EXISTS download_tasks (
   task_id TEXT PRIMARY KEY,

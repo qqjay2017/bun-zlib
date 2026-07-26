@@ -7,6 +7,7 @@ import "./controllers/download.controller";
 import "./controllers/cache.controller";
 import "./controllers/source.controller";
 import "./controllers/history.controller";
+import "./controllers/bookshelf.controller";
 
 // 触发源注册
 import "./lib/sources";

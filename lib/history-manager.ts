@@ -68,13 +68,14 @@ export async function saveVisitHistory(item: VisitHistoryItem): Promise<void> {
 
   db.transaction(() => {
     db.query(`
-      DELETE FROM visit_history
-      WHERE type = ? AND source_id = ? AND book_id = ? AND path = ? AND chapter_id IS ?
-    `).run(item.type, item.sourceId, item.bookId, item.path, item.chapterId ?? null);
-
-    db.query(`
       INSERT INTO visit_history (type, source_id, book_id, book_name, chapter_id, chapter_name, path, visited_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (type, source_id, book_id) DO UPDATE SET
+        book_name = excluded.book_name,
+        chapter_id = excluded.chapter_id,
+        chapter_name = excluded.chapter_name,
+        path = excluded.path,
+        visited_at = excluded.visited_at
     `).run(
       item.type,
       item.sourceId,

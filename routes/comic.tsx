@@ -102,7 +102,7 @@ function ComicSearchPage() {
           <div className="history-list">
             {historyQuery.data.map((item) => (
               <Link
-                key={`${item.path}-${item.visitedAt}`}
+                key={`${item.type}-${item.sourceId}-${item.bookId}`}
                 to={"/comic/$sourceId/$bookId" as any}
                 params={{ sourceId: item.sourceId, bookId: item.bookId } as any}
                 className="history-item"
