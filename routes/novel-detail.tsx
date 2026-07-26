@@ -5,6 +5,7 @@ import { novelRoute } from "./novel";
 import { source69shuba } from "../lib/sources/69shuba";
 import { saveVisitHistory } from "../lib/history-api";
 import { normalizeChapterOrder } from "../lib/chapter-order";
+import { DownloadCenterModal } from "../components/download-center-modal";
 import type { BookMetadata, ChapterMetadata } from "../lib/cache-types";
 
 export const novelDetailRoute = createRoute({
@@ -191,6 +192,7 @@ function NovelDetailContent() {
   const queryClient = useQueryClient();
   const [inShelf, setInShelf] = useState(false);
   const [exportResult, setExportResult] = useState<ExportResult | null>(null);
+  const [downloadCenterOpen, setDownloadCenterOpen] = useState(false);
 
   const bookQuery = useQuery({
     queryKey: ["novel", sourceId, bookId, "metadata"],
@@ -359,6 +361,12 @@ function NovelDetailContent() {
                 >
                   {exportMutation.isPending ? "导出中..." : "导出 EPUB"}
                 </button>
+                <button
+                  className="btn-secondary"
+                  onClick={() => setDownloadCenterOpen(true)}
+                >
+                  下载中心
+                </button>
               </div>
             </div>
           </div>
@@ -390,6 +398,10 @@ function NovelDetailContent() {
             </div>
           </div>
         </>
+      )}
+
+      {downloadCenterOpen && (
+        <DownloadCenterModal onClose={() => setDownloadCenterOpen(false)} />
       )}
     </div>
   );

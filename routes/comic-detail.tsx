@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { comicRoute } from "./comic";
 import { sourceManwapi } from "../lib/sources/manwapi";
 import { sourceManhuafree } from "../lib/sources/manhuafree";
+import { getLatestVisit } from "../lib/history-api";
 import type { BookSourceConfig } from "../lib/source-config";
 import type { BookMetadata, ChapterMetadata } from "../lib/cache-types";
 
@@ -227,6 +228,12 @@ function ComicDetailContent() {
     staleTime: 60_000,
   });
 
+  const latestVisitQuery = useQuery({
+    queryKey: ["history", "comic", sourceId, bookId, "latest"],
+    queryFn: () => getLatestVisit("comic", sourceId, bookId),
+    staleTime: 10_000,
+  });
+
   const refreshDetailMutation = useMutation({
     mutationFn: () => fetchComicFromSource(sourceId, bookId),
     onSuccess: (comic) => {
@@ -278,6 +285,8 @@ function ComicDetailContent() {
   const comic = comicQuery.data;
   const chapters = chapterQuery.data ?? [];
   const firstChapter = chapters[0];
+  const continueChapterId = latestVisitQuery.data?.chapterId;
+  const continueChapterName = latestVisitQuery.data?.chapterName;
   const error = comicQuery.error
     || chapterQuery.error
     || refreshDetailMutation.error
@@ -321,11 +330,20 @@ function ComicDetailContent() {
               </div>
               <p className="book-desc">{comic.description}</p>
               <div className="book-actions">
+                {continueChapterId && (
+                  <Link
+                    to={"/comic/$sourceId/$bookId/$chapterId" as any}
+                    params={{ sourceId, bookId, chapterId: continueChapterId } as any}
+                    className="btn-cta"
+                  >
+                    继续阅读 {continueChapterName}
+                  </Link>
+                )}
                 {firstChapter && (
                   <Link
                     to={"/comic/$sourceId/$bookId/$chapterId" as any}
                     params={{ sourceId, bookId, chapterId: firstChapter.chapterId } as any}
-                    className="btn-cta"
+                    className={continueChapterId ? "btn-secondary" : "btn-cta"}
                   >
                     开始阅读
                   </Link>

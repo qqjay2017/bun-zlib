@@ -1,8 +1,14 @@
 import { defineController } from "../lib/controller";
-import { listVisitHistory, saveVisitHistory } from "../lib/history-manager";
+import { getLatestVisit, listVisitHistory, saveVisitHistory } from "../lib/history-manager";
 import type { ContentType } from "../lib/cache-types";
 
 defineController("/api/history", {
+  "GET /:type/:sourceId/:bookId/latest": async (_req, params) => {
+    const type = params.type as ContentType;
+    const data = await getLatestVisit(type, params.sourceId!, params.bookId!);
+    return Response.json({ success: true, data });
+  },
+
   "GET /:type": async (_req, params) => {
     const type = params.type as ContentType;
     const data = await listVisitHistory(type);

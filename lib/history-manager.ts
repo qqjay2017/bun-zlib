@@ -48,6 +48,21 @@ export async function listVisitHistory(type?: ContentType): Promise<VisitHistory
   return rows.map(rowToItem);
 }
 
+export async function getLatestVisit(
+  type: ContentType,
+  sourceId: string,
+  bookId: string,
+): Promise<VisitHistoryItem | null> {
+  const db = getDb();
+  const row = db.query(`
+    SELECT * FROM visit_history
+    WHERE type = ? AND source_id = ? AND book_id = ?
+    ORDER BY visited_at DESC
+    LIMIT 1
+  `).get(type, sourceId, bookId) as VisitHistoryRow | null;
+  return row ? rowToItem(row) : null;
+}
+
 export async function saveVisitHistory(item: VisitHistoryItem): Promise<void> {
   const db = getDb();
 

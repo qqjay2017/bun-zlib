@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { createRoute, Outlet, useMatches, useNavigate } from "@tanstack/react-router";
+import { createRoute, Link, Outlet, useMatches, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { rootRoute } from "./__root";
 import { source69shuba } from "../lib/sources/69shuba";
@@ -97,12 +97,17 @@ function NovelSearchPage() {
         {historyQuery.data?.length ? (
           <div className="history-list">
             {historyQuery.data.map((item) => (
-              <a key={`${item.path}-${item.visitedAt}`} href={item.path} className="history-item">
+              <Link
+                key={`${item.path}-${item.visitedAt}`}
+                to={"/novel/$sourceId/$bookId" as any}
+                params={{ sourceId: item.sourceId, bookId: item.bookId } as any}
+                className="history-item"
+              >
                 <div className="history-item-title">{item.bookName}</div>
                 <div className="history-item-subtitle">
                   {item.chapterName ? `章节：${item.chapterName}` : `来源：${item.sourceId}`}
                 </div>
-              </a>
+              </Link>
             ))}
           </div>
         ) : (
