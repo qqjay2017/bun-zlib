@@ -235,7 +235,7 @@ export function DownloadCenterPanel({ onClose }: DownloadCenterPanelProps = {}) 
         <div className="task-list">
           {tasks.map((task) => {
             const progress = task.progress;
-            const downloadingChapter = task.chapters.find((ch) => ch.status === "downloading");
+            const downloadingChapters = task.chapters.filter((ch) => ch.status === "downloading");
             const stalledMs = now - task.updatedAt;
             const isStalled = task.status === "downloading" && stalledMs > STALL_WARNING_MS;
             const title = titles[titleCacheKey(task)];
@@ -281,9 +281,12 @@ export function DownloadCenterPanel({ onClose }: DownloadCenterPanelProps = {}) 
                   </span>
                 </div>
 
-                {downloadingChapter && (
+                {downloadingChapters.length > 0 && (
                   <div className="task-current-chapter">
-                    正在下载：{downloadingChapter.chapterName}
+                    正在下载：
+                    {downloadingChapters
+                      .map((chapter) => chapter.chapterName)
+                      .join("、")}
                   </div>
                 )}
 

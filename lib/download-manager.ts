@@ -19,6 +19,7 @@ import { cacheComicChapterImages } from "./comic-assets";
 // ============================================================
 
 const MAX_CONCURRENCY = 8;
+const MAX_CONCURRENT_CHAPTERS_PER_COMIC_TASK = 3;
 const HTTP_ONLY_SOURCES = new Set(["manwapi"]);
 const CHAPTER_DELAY_MS = 500;
 const HTTP_ONLY_CHAPTER_DELAY_MS = 0;
@@ -229,22 +230,37 @@ class DownloadManager {
         continue;
       }
 
-      const nextChapter = task.chapters.find((ch) => ch.status === "pending");
-      if (!nextChapter) continue;
-
       if (task.status === "pending") {
         task.status = "downloading";
         task.updatedAt = Date.now();
       }
 
-      nextChapter.status = "downloading";
-      this.persistChapterStatus(
-        task.taskId,
-        nextChapter.chapterId,
-        nextChapter.status,
-      );
-      this.activeCount++;
-      this.executeChapter(task, nextChapter);
+      const taskConcurrency = task.contentType === "comic"
+        ? MAX_CONCURRENT_CHAPTERS_PER_COMIC_TASK
+        : 1;
+      let taskActiveCount = task.chapters.filter(
+        (chapter) => chapter.status === "downloading",
+      ).length;
+
+      while (
+        taskActiveCount < taskConcurrency
+        && this.activeCount < MAX_CONCURRENCY
+      ) {
+        const nextChapter = task.chapters.find(
+          (chapter) => chapter.status === "pending",
+        );
+        if (!nextChapter) break;
+
+        nextChapter.status = "downloading";
+        this.persistChapterStatus(
+          task.taskId,
+          nextChapter.chapterId,
+          nextChapter.status,
+        );
+        taskActiveCount++;
+        this.activeCount++;
+        void this.executeChapter(task, nextChapter);
+      }
 
       if (this.activeCount >= MAX_CONCURRENCY) return;
     }
