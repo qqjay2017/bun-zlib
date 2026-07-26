@@ -219,7 +219,7 @@ class DownloadManager {
         chapter.chapterId,
       );
 
-      if (existing) {
+      if (existing?.content) {
         if (task.contentType === 'comic') {
           await cacheComicChapterImages(task.sourceId, task.bookId, existing);
         }
