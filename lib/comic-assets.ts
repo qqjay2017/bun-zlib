@@ -3,9 +3,11 @@ import { fetchRemoteResponse } from '../backend';
 import {
   listChapterImages,
   saveChapterImage,
+  saveChapter,
   type CachedImageFile,
 } from './cache-manager';
 import type { ChapterMetadata } from './cache-types';
+import { getSourceById } from './source-config';
 
 const MANWAPI_AES_KEY = '0B6666A0-BB59-1381-B746-a0E4C9AC';
 
@@ -13,7 +15,7 @@ export function getChapterImageUrls(chapter: ChapterMetadata): string[] {
   return (chapter.content ?? '')
     .split(/\n+/)
     .map((url) => url.trim())
-    .filter(Boolean);
+    .filter((url) => /^https?:\/\//i.test(url));
 }
 
 export function imageExt(bytes: Uint8Array): string {
@@ -52,6 +54,28 @@ async function fetchComicImage(sourceId: string, url: string): Promise<Uint8Arra
   return new Uint8Array(await res.arrayBuffer());
 }
 
+async function normalizeComicChapterContent(
+  sourceId: string,
+  bookId: string,
+  chapter: ChapterMetadata,
+): Promise<{ chapter: ChapterMetadata; urls: string[] }> {
+  const urls = getChapterImageUrls(chapter);
+  if (urls.length > 0) return { chapter, urls };
+
+  const extracted = getSourceById(sourceId)?.extractors.extractContent(chapter.content ?? '');
+  if (!extracted?.content) return { chapter, urls };
+
+  const normalized: ChapterMetadata = {
+    ...chapter,
+    chapterName: extracted.chapterName || chapter.chapterName,
+    content: extracted.content,
+    cachedAt: Date.now(),
+  };
+
+  await saveChapter('comic', sourceId, bookId, normalized);
+  return { chapter: normalized, urls: getChapterImageUrls(normalized) };
+}
+
 export function cachedImageApiUrl(
   sourceId: string,
   bookId: string,
@@ -79,8 +103,12 @@ export async function cacheComicChapterImages(
   }
 
   const cached = await getCachedComicChapterImages(sourceId, bookId, chapter.chapterId);
-  const urls = getChapterImageUrls(chapter);
+  const { urls } = await normalizeComicChapterContent(sourceId, bookId, chapter);
   if (cached.length >= urls.length && urls.length > 0) return cached;
+  if (urls.length === 0) {
+    if (cached.length > 0) return cached;
+    throw new Error(`章节没有可缓存的图片地址: ${chapter.chapterName || chapter.chapterId}`);
+  }
 
   const files: CachedImageFile[] = [];
   for (let i = 0; i < urls.length; i++) {

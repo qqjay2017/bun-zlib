@@ -24,10 +24,29 @@ function meta(doc: Document, property: string): string {
   return text(doc.querySelector(`meta[property="${property}"]`)?.getAttribute('content'));
 }
 
+function decodeHtmlText(value: string): string {
+  return value
+    .replace(/&quot;/g, '"')
+    .replace(/&#34;/g, '"')
+    .replace(/&#x22;/gi, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/gi, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+}
+
 function parseJsonText(html: string): any {
-  const raw = html.trim().startsWith('{')
-    ? html.trim()
-    : new DOMParser().parseFromString(html, 'text/html').body.textContent?.trim() || html;
+  const trimmed = html.trim();
+  if (trimmed.startsWith('{')) return JSON.parse(trimmed);
+
+  const preText = trimmed.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i)?.[1];
+  if (preText) return JSON.parse(decodeHtmlText(preText.trim()));
+
+  const raw = typeof DOMParser === 'function'
+    ? new DOMParser().parseFromString(trimmed, 'text/html').body.textContent?.trim() || trimmed
+    : decodeHtmlText(trimmed.replace(/<[^>]+>/g, '')).trim();
   return JSON.parse(raw);
 }
 
