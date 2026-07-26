@@ -10,6 +10,7 @@ import type { ChapterMetadata } from './cache-types';
 import { getSourceById } from './source-config';
 
 const MANWAPI_AES_KEY = '0B6666A0-BB59-1381-B746-a0E4C9AC';
+const IMAGE_DOWNLOAD_CONCURRENCY = 4;
 
 export function getChapterImageUrls(chapter: ChapterMetadata): string[] {
   return (chapter.content ?? '')
@@ -108,17 +109,31 @@ export async function cacheComicChapterImages(
   }
 
   const files: CachedImageFile[] = [];
-  for (let i = 0; i < urls.length; i++) {
-    const existing = cached.find((file) => file.filename.startsWith(`${String(i + 1).padStart(3, '0')}.`));
-    if (existing) {
-      files.push(existing);
-      continue;
-    }
+  const results: Array<CachedImageFile | undefined> = new Array(urls.length);
+  let nextIndex = 0;
 
-    const image = await fetchComicImage(sourceId, urls[i]!);
-    const filename = `${String(i + 1).padStart(3, '0')}.${imageExt(image)}`;
-    const filePath = await saveChapterImage('comic', sourceId, bookId, chapter.chapterId, filename, image);
-    files.push({ filename, path: filePath });
+  await Promise.all(
+    Array.from({ length: Math.min(IMAGE_DOWNLOAD_CONCURRENCY, urls.length) }, async () => {
+      while (true) {
+        const i = nextIndex++;
+        if (i >= urls.length) return;
+
+        const existing = cached.find((file) => file.filename.startsWith(`${String(i + 1).padStart(3, '0')}.`));
+        if (existing) {
+          results[i] = existing;
+          continue;
+        }
+
+        const image = await fetchComicImage(sourceId, urls[i]!);
+        const filename = `${String(i + 1).padStart(3, '0')}.${imageExt(image)}`;
+        const filePath = await saveChapterImage('comic', sourceId, bookId, chapter.chapterId, filename, image);
+        results[i] = { filename, path: filePath };
+      }
+    }),
+  );
+
+  for (const file of results) {
+    if (file) files.push(file);
   }
 
   return files.sort((a, b) => path.basename(a.filename).localeCompare(path.basename(b.filename), undefined, { numeric: true }));
