@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { comicDetailRoute } from "./comic-detail";
 import { getManwapiImageApiUrl, sourceManwapi } from "../lib/sources/manwapi";
 import { sourceManhuafree } from "../lib/sources/manhuafree";
+import { saveVisitHistory } from "../lib/history-api";
 import type { BookSourceConfig } from "../lib/source-config";
 import type { BookMetadata } from "../lib/cache-types";
 import type { ChapterMetadata } from "../lib/cache-types";
