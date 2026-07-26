@@ -25,9 +25,20 @@ async function getChromeBackend() {
   };
 }
 
-let sharedBookView: Promise<Bun.WebView> | null = null;
-let bookViewQueue: Promise<void> = Promise.resolve();
-let lastBookViewNavigationAt = 0;
+interface BookViewLane {
+  view: Promise<Bun.WebView> | null;
+  queue: Promise<void>;
+  lastNavigationAt: number;
+  pendingCount: number;
+}
+
+const WEBVIEW_POOL_SIZE = 3;
+const bookViewLanes: BookViewLane[] = Array.from({ length: WEBVIEW_POOL_SIZE }, () => ({
+  view: null,
+  queue: Promise.resolve(),
+  lastNavigationAt: 0,
+  pendingCount: 0,
+}));
 
 const MIN_BOOK_VIEW_NAVIGATION_INTERVAL_MS = 300;
 const MAX_BOOK_VIEW_NAVIGATION_INTERVAL_MS = 2_000;
@@ -46,9 +57,14 @@ async function createBookView(): Promise<Bun.WebView> {
   });
 }
 
-function getSharedBookView(): Promise<Bun.WebView> {
-  sharedBookView ??= createBookView();
-  return sharedBookView;
+function getLaneView(lane: BookViewLane): Promise<Bun.WebView> {
+  lane.view ??= createBookView();
+  return lane.view;
+}
+
+/** 挑选当前排队最少的 lane；并列时取下标最小的 */
+function pickLeastBusyLane(): BookViewLane {
+  return bookViewLanes.reduce((best, lane) => (lane.pendingCount < best.pendingCount ? lane : best));
 }
 
 function getRandomNavigationInterval(): number {
@@ -102,15 +118,18 @@ export async function fetchBookPageHtml(url: string): Promise<string> {
     return cached.html;
   }
 
-  const task = bookViewQueue.then(async () => {
+  const lane = pickLeastBusyLane();
+  lane.pendingCount++;
+
+  const task = lane.queue.then(async () => {
     try {
-      const view = await getSharedBookView();
+      const view = await getLaneView(lane);
       const waitMs = Math.max(
         0,
-        getRandomNavigationInterval() - (Date.now() - lastBookViewNavigationAt),
+        getRandomNavigationInterval() - (Date.now() - lane.lastNavigationAt),
       );
       if (waitMs > 0) await Bun.sleep(waitMs);
-      lastBookViewNavigationAt = Date.now();
+      lane.lastNavigationAt = Date.now();
 
       await view.navigate(url);
       let html = await view.evaluate<string>("document.documentElement.outerHTML");
@@ -123,14 +142,16 @@ export async function fetchBookPageHtml(url: string): Promise<string> {
 
       return html;
     } catch (error) {
-      sharedBookView = null;
+      lane.view = null;
       throw error;
+    } finally {
+      lane.pendingCount--;
     }
   });
 
   htmlFetchCache.set(url, { fetchedAt: Date.now(), promise: task });
 
-  bookViewQueue = task.then(
+  lane.queue = task.then(
     () => {},
     () => {},
   );

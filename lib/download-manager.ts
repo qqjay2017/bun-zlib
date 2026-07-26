@@ -20,7 +20,7 @@ import { cacheComicChapterImages } from './comic-assets';
 
 const MAX_CONCURRENCY = 4;
 const HTTP_ONLY_SOURCES = new Set(['manwapi']);
-const CHAPTER_DELAY_MS = 2_000;
+const CHAPTER_DELAY_MS = 500;
 const HTTP_ONLY_CHAPTER_DELAY_MS = 0;
 
 function getChapterDelayMs(sourceId: string): number {
