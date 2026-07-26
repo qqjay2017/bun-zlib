@@ -18,7 +18,7 @@ import { cacheComicChapterImages } from './comic-assets';
 // 常量
 // ============================================================
 
-const MAX_CONCURRENCY = 1;
+const MAX_CONCURRENCY = 4;
 const CHAPTER_DELAY_MS = 2_000;
 
 class CloudflareChallengeError extends Error {

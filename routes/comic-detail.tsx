@@ -36,6 +36,12 @@ type ExportResult = {
   outputDir: string;
   files: Array<{ path: string; filename: string; size: number }>;
 };
+type ExportJob = {
+  jobId: string;
+  status: "running" | "done" | "error";
+  result?: ExportResult;
+  error?: string;
+};
 
 const COMIC_SHELF_KEY = "bookshelf:comic";
 
@@ -72,6 +78,25 @@ async function writeCache(url: string, data: unknown): Promise<void> {
   });
   const result = (await res.json()) as ApiResult<unknown>;
   if (!result.success) throw new Error(result.error || "缓存写入失败");
+}
+
+async function waitForExportJob(jobId: string): Promise<ExportResult> {
+  while (true) {
+    const res = await fetch(`/api/download/export-jobs/${jobId}`);
+    const result = (await res.json()) as ApiResult<ExportJob>;
+    if (!result.success || !result.data) throw new Error(result.error || "导出任务查询失败");
+
+    if (result.data.status === "done") {
+      if (!result.data.result) throw new Error("导出任务缺少结果");
+      return result.data.result;
+    }
+
+    if (result.data.status === "error") {
+      throw new Error(result.data.error || "CBZ 导出失败");
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
 }
 
 function readShelfBooks(): ShelfBook[] {
@@ -228,9 +253,9 @@ function ComicDetailContent() {
   const exportMutation = useMutation({
     mutationFn: async () => {
       const res = await fetch(`/api/download/cbz/comic/${sourceId}/${bookId}`);
-      const result = (await res.json()) as ApiResult<ExportResult>;
-      if (!result.success || !result.data) throw new Error(result.error || "CBZ 导出失败");
-      return result.data;
+      const result = (await res.json()) as ApiResult<{ jobId: string }>;
+      if (!result.success || !result.data?.jobId) throw new Error(result.error || "CBZ 导出任务创建失败");
+      return waitForExportJob(result.data.jobId);
     },
     onSuccess: (result) => {
       setExportResult(result);

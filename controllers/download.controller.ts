@@ -1,6 +1,7 @@
 import { defineController } from "../lib/controller";
 import { downloadManager } from "../lib/download-manager";
 import { exportComicCbzToProject, exportNovelEpubToProject } from "../lib/export-manager";
+import { exportJobManager } from "../lib/export-job-manager";
 import type { ContentType } from "../lib/cache-types";
 import type { CreateDownloadRequest, DownloadTask, ProgressListener } from "../lib/download-types";
 
@@ -35,15 +36,16 @@ defineController("/api/download", {
 
   "GET /cbz/comic/:sourceId/:bookId": async (_req, params) => {
     const { sourceId, bookId } = params;
-    try {
-      const result = await exportComicCbzToProject(sourceId!, bookId!);
-      return Response.json({ success: true, data: result });
-    } catch (error) {
-      return Response.json(
-        { success: false, error: error instanceof Error ? error.message : "CBZ 导出失败" },
-        { status: 500 },
-      );
+    const job = exportJobManager.start(() => exportComicCbzToProject(sourceId!, bookId!));
+    return Response.json({ success: true, data: { jobId: job.jobId } });
+  },
+
+  "GET /export-jobs/:jobId": async (_req, params) => {
+    const job = exportJobManager.get(params.jobId!);
+    if (!job) {
+      return Response.json({ success: false, error: "导出任务不存在" }, { status: 404 });
     }
+    return Response.json({ success: true, data: job });
   },
 
   "GET /progress": async () => {
