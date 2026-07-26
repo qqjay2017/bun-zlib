@@ -19,9 +19,11 @@ function unique<T>(items: T[]): T[] {
 }
 
 function parseJsonFromHtml(html: string): unknown {
-  const doc = new DOMParser().parseFromString(html, 'text/html');
-  const preText = doc.querySelector('pre')?.textContent;
-  const raw = preText || doc.body.textContent || html;
+  let raw = html.trim();
+  if (!raw.startsWith('{') && typeof DOMParser !== 'undefined') {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    raw = doc.querySelector('pre')?.textContent || doc.body.textContent || html;
+  }
   return JSON.parse(raw);
 }
 
@@ -126,4 +128,13 @@ const sourceManwapi: BookSourceConfig = {
 
 registerSource(sourceManwapi);
 
-export { sourceManwapi };
+function getManwapiImageApiUrl(chapterId: string, imageSource = 'https://tu.mwzu.cc'): string {
+  const params = new URLSearchParams({
+    page: '1',
+    page_size: '200',
+    image_source: imageSource,
+  });
+  return `${sourceManwapi.domain}/api/comic/image/${chapterId}?${params}`;
+}
+
+export { getManwapiImageApiUrl, sourceManwapi };

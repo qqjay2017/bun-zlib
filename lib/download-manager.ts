@@ -8,9 +8,11 @@ import type {
   ProgressListener,
   TaskProgress,
 } from './download-types';
-import { fetchPageHtml } from '../backend';
+import { fetchPageHtml, fetchRemoteText } from '../backend';
 import { loadChapter, saveChapter, getCacheRoot } from './cache-manager';
 import { getSourceById } from './source-config';
+import { getManwapiImageApiUrl } from './sources/manwapi';
+import { cacheComicChapterImages } from './comic-assets';
 
 // ============================================================
 // 常量
@@ -164,6 +166,9 @@ class DownloadManager {
       );
 
       if (existing) {
+        if (task.contentType === 'comic') {
+          await cacheComicChapterImages(task.sourceId, task.bookId, existing);
+        }
         chapter.status = 'completed';
         task.progress.completed++;
         this.updateProgress(task);
@@ -172,22 +177,20 @@ class DownloadManager {
         return;
       }
 
-      // === Executor 流程：fetchPageHtml → extractContent → saveChapter ===
-
-      // 1. 获取 HTML
-      const html = await this.fetchChapterHtml(chapter.chapterDetailUrl);
-      if (isChallengePage(html)) {
+      // === Executor 流程：fetch page/json → extractContent → saveChapter ===
+      const raw = await this.fetchChapterContent(task, chapter);
+      if (isChallengePage(raw)) {
         throw new CloudflareChallengeError();
       }
 
       // 2. 通过 executor 提取正文内容
       const sourceConfig = getSourceById(task.sourceId);
-      let content = html; // 默认保存完整 HTML
+      let content = raw; // 默认保存原始内容
       let chapterName = chapter.chapterName;
 
       if (sourceConfig?.extractors) {
         try {
-          const extracted = sourceConfig.extractors.extractContent(html);
+          const extracted = sourceConfig.extractors.extractContent(raw);
           if (extracted) {
             content = extracted.content;
             if (extracted.chapterName) chapterName = extracted.chapterName;
@@ -198,13 +201,21 @@ class DownloadManager {
       }
 
       // 3. 保存到缓存
-      await saveChapter(task.contentType, task.sourceId, task.bookId, {
+      const cachedChapter = {
         chapterId: chapter.chapterId,
         chapterDetailUrl: chapter.chapterDetailUrl,
         chapterIndex: task.chapters.indexOf(chapter),
         chapterName,
         content,
-      });
+      };
+
+      await saveChapter(task.contentType, task.sourceId, task.bookId, cachedChapter);
+      if (task.contentType === 'comic') {
+        await cacheComicChapterImages(task.sourceId, task.bookId, {
+          ...cachedChapter,
+          cachedAt: Date.now(),
+        });
+      }
 
       chapter.status = 'completed';
       task.progress.completed++;
@@ -261,6 +272,14 @@ class DownloadManager {
       ((task.progress.completed + task.progress.failed) / task.progress.total) * 100,
     );
     task.updatedAt = Date.now();
+  }
+
+  private async fetchChapterContent(task: DownloadTask, chapter: ChapterDownloadItem): Promise<string> {
+    if (task.contentType === 'comic' && task.sourceId === 'manwapi') {
+      return fetchRemoteText(getManwapiImageApiUrl(chapter.chapterId));
+    }
+
+    return this.fetchChapterHtml(chapter.chapterDetailUrl);
   }
 
   private async fetchChapterHtml(url: string): Promise<string> {

@@ -6,6 +6,8 @@ import {
   saveBookMetadata,
   saveChapterList,
   saveChapter,
+  loadChapterImage,
+  listChapterImages,
 } from "../lib/cache-manager";
 import type { BookMetadata, ChapterMetadata, ContentType } from "../lib/cache-types";
 
@@ -29,6 +31,36 @@ defineController("/api/cache", {
     const { type, sourceId, bookId, chapterId } = params;
     const data = await loadChapter(type as ContentType, sourceId!, bookId!, chapterId!);
     return Response.json({ success: true, data });
+  },
+
+  "GET /:type/:sourceId/:bookId/chapter/:chapterId/image/:filename": async (_req, params) => {
+    const { type, sourceId, bookId, chapterId, filename } = params;
+    const data = await loadChapterImage(type as ContentType, sourceId!, bookId!, chapterId!, filename!);
+    if (!data) {
+      return Response.json({ success: false, error: "Image not found" }, { status: 404 });
+    }
+
+    const ext = filename!.split(".").pop()?.toLowerCase();
+    const contentType = ext === "png"
+      ? "image/png"
+      : ext === "webp"
+        ? "image/webp"
+        : ext === "gif"
+          ? "image/gif"
+          : "image/jpeg";
+
+    return new Response(data, {
+      headers: {
+        "Content-Type": contentType,
+        "Cache-Control": "public, max-age=86400",
+      },
+    });
+  },
+
+  "GET /:type/:sourceId/:bookId/chapter/:chapterId/images": async (_req, params) => {
+    const { type, sourceId, bookId, chapterId } = params;
+    const files = await listChapterImages(type as ContentType, sourceId!, bookId!, chapterId!);
+    return Response.json({ success: true, data: files.map((file) => file.filename) });
   },
 
   // 写入书籍元数据

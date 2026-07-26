@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { createRoute, Link, Outlet, useMatches } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { comicRoute } from "./comic";
@@ -17,6 +18,26 @@ type ApiResult<T> = {
 };
 
 type ChapterItem = Omit<ChapterMetadata, "cachedAt">;
+type ShelfBook = Pick<
+  BookMetadata,
+  | "bookId"
+  | "sourceId"
+  | "contentType"
+  | "name"
+  | "author"
+  | "coverImageUrl"
+  | "description"
+  | "detailPageUrl"
+> & {
+  addedAt: number;
+};
+
+type ExportResult = {
+  outputDir: string;
+  files: Array<{ path: string; filename: string; size: number }>;
+};
+
+const COMIC_SHELF_KEY = "bookshelf:comic";
 
 function getDetailUrl(bookId: string): string {
   return `${sourceManwapi.domain}/comic/${bookId}`;
@@ -51,6 +72,39 @@ async function writeCache(url: string, data: unknown): Promise<void> {
   });
   const result = (await res.json()) as ApiResult<unknown>;
   if (!result.success) throw new Error(result.error || "缓存写入失败");
+}
+
+function readShelfBooks(): ShelfBook[] {
+  try {
+    const raw = localStorage.getItem(COMIC_SHELF_KEY);
+    return raw ? JSON.parse(raw) as ShelfBook[] : [];
+  } catch {
+    return [];
+  }
+}
+
+function isBookInShelf(sourceId: string, bookId: string): boolean {
+  return readShelfBooks().some((book) => book.sourceId === sourceId && book.bookId === bookId);
+}
+
+function addBookToShelf(book: BookMetadata): void {
+  const books = readShelfBooks();
+  const nextBook: ShelfBook = {
+    bookId: book.bookId,
+    sourceId: book.sourceId,
+    contentType: book.contentType,
+    name: book.name,
+    author: book.author,
+    coverImageUrl: book.coverImageUrl,
+    description: book.description,
+    detailPageUrl: book.detailPageUrl,
+    addedAt: Date.now(),
+  };
+  const nextBooks = [
+    nextBook,
+    ...books.filter((item) => item.sourceId !== book.sourceId || item.bookId !== book.bookId),
+  ];
+  localStorage.setItem(COMIC_SHELF_KEY, JSON.stringify(nextBooks));
 }
 
 function parseHtml(html: string, url: string): Document {
@@ -119,6 +173,8 @@ function ComicDetailLayout() {
 function ComicDetailContent() {
   const { sourceId, bookId } = comicDetailRoute.useParams();
   const queryClient = useQueryClient();
+  const [inShelf, setInShelf] = useState(false);
+  const [exportResult, setExportResult] = useState<ExportResult | null>(null);
 
   const comicQuery = useQuery({
     queryKey: ["comic", sourceId, bookId, "metadata"],
@@ -151,10 +207,55 @@ function ComicDetailContent() {
     },
   });
 
+  const downloadMutation = useMutation({
+    mutationFn: async (chapters: ChapterMetadata[]) => {
+      const res = await fetch("/api/download/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceId,
+          bookId,
+          contentType: "comic",
+          chapters: chapters.map(({ cachedAt, content, chapterIndex, ...chapter }) => chapter),
+        }),
+      });
+      const result = (await res.json()) as ApiResult<unknown>;
+      if (!result.success) throw new Error(result.error || "创建缓存任务失败");
+      await queryClient.invalidateQueries({ queryKey: ["download", "tasks"] });
+    },
+  });
+
+  const exportMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/download/cbz/comic/${sourceId}/${bookId}`);
+      const result = (await res.json()) as ApiResult<ExportResult>;
+      if (!result.success || !result.data) throw new Error(result.error || "CBZ 导出失败");
+      return result.data;
+    },
+    onSuccess: (result) => {
+      setExportResult(result);
+    },
+  });
+
   const comic = comicQuery.data;
   const chapters = chapterQuery.data ?? [];
   const firstChapter = chapters[0];
-  const error = comicQuery.error || chapterQuery.error || refreshDetailMutation.error || refreshChaptersMutation.error;
+  const error = comicQuery.error
+    || chapterQuery.error
+    || refreshDetailMutation.error
+    || refreshChaptersMutation.error
+    || downloadMutation.error
+    || exportMutation.error;
+
+  useEffect(() => {
+    if (comic) setInShelf(isBookInShelf(sourceId, bookId));
+  }, [bookId, comic, sourceId]);
+
+  const handleAddShelf = () => {
+    if (!comic) return;
+    addBookToShelf(comic);
+    setInShelf(true);
+  };
 
   return (
     <div className="page detail-page">
@@ -183,6 +284,13 @@ function ComicDetailContent() {
               <div className="book-actions">
                 <button
                   className="btn-secondary"
+                  disabled={inShelf}
+                  onClick={handleAddShelf}
+                >
+                  {inShelf ? "已在书架" : "添加书架"}
+                </button>
+                <button
+                  className="btn-secondary"
                   disabled={refreshDetailMutation.isPending}
                   onClick={() => refreshDetailMutation.mutate()}
                 >
@@ -194,6 +302,20 @@ function ComicDetailContent() {
                   onClick={() => refreshChaptersMutation.mutate()}
                 >
                   {refreshChaptersMutation.isPending ? "刷新中..." : "刷新目录"}
+                </button>
+                <button
+                  className="btn-secondary"
+                  disabled={!chapters.length || downloadMutation.isPending}
+                  onClick={() => downloadMutation.mutate(chapters)}
+                >
+                  {downloadMutation.isPending ? "任务创建中..." : "缓存全部章节"}
+                </button>
+                <button
+                  className="btn-secondary"
+                  disabled={!chapters.length || exportMutation.isPending}
+                  onClick={() => exportMutation.mutate()}
+                >
+                  {exportMutation.isPending ? "导出中..." : "导出 CBZ"}
                 </button>
                 {firstChapter && (
                   <Link
@@ -207,6 +329,12 @@ function ComicDetailContent() {
               </div>
             </div>
           </div>
+
+          {exportResult && (
+            <div className="success-message">
+              已导出到：{exportResult.outputDir}（{exportResult.files.length} 个文件）
+            </div>
+          )}
 
           <div className="chapter-section">
             <h2 className="section-title">

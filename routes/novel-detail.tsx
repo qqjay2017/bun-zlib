@@ -19,6 +19,10 @@ type ApiResult<T> = {
 };
 
 type ChapterItem = Omit<ChapterMetadata, "cachedAt">;
+type ExportResult = {
+  outputDir: string;
+  files: Array<{ path: string; filename: string; size: number }>;
+};
 type ShelfBook = Pick<
   BookMetadata,
   | "bookId"
@@ -185,6 +189,7 @@ function NovelDetailContent() {
   const { sourceId, bookId } = novelDetailRoute.useParams();
   const queryClient = useQueryClient();
   const [inShelf, setInShelf] = useState(false);
+  const [exportResult, setExportResult] = useState<ExportResult | null>(null);
 
   const bookQuery = useQuery({
     queryKey: ["novel", sourceId, bookId, "metadata"],
@@ -242,6 +247,18 @@ function NovelDetailContent() {
     },
   });
 
+  const exportMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/download/epub/novel/${sourceId}/${bookId}`);
+      const result = (await res.json()) as ApiResult<ExportResult>;
+      if (!result.success || !result.data) throw new Error(result.error || "EPUB 导出失败");
+      return result.data;
+    },
+    onSuccess: (result) => {
+      setExportResult(result);
+    },
+  });
+
   const book = bookQuery.data;
   const chapters = chapterQuery.data ?? [];
   const firstChapter = chapters[0];
@@ -249,7 +266,8 @@ function NovelDetailContent() {
     || chapterQuery.error
     || refreshDetailMutation.error
     || refreshChaptersMutation.error
-    || downloadMutation.error;
+    || downloadMutation.error
+    || exportMutation.error;
 
   const handleAddShelf = () => {
     if (!book) return;
@@ -310,12 +328,13 @@ function NovelDetailContent() {
                 >
                   {downloadMutation.isPending ? "任务创建中..." : "缓存全部章节"}
                 </button>
-                <a
-                  className={`btn-secondary${chapters.length ? "" : " disabled"}`}
-                  href={chapters.length ? `/api/download/epub/novel/${sourceId}/${bookId}` : undefined}
+                <button
+                  className="btn-secondary"
+                  disabled={!chapters.length || exportMutation.isPending}
+                  onClick={() => exportMutation.mutate()}
                 >
-                  下载 EPUB
-                </a>
+                  {exportMutation.isPending ? "导出中..." : "导出 EPUB"}
+                </button>
                 {firstChapter && (
                   <Link
                     to={"/novel/$sourceId/$bookId/$chapterId" as any}
@@ -328,6 +347,12 @@ function NovelDetailContent() {
               </div>
             </div>
           </div>
+
+          {exportResult && (
+            <div className="success-message">
+              已导出到：{exportResult.outputDir}（{exportResult.files.length} 个文件）
+            </div>
+          )}
 
           <div className="chapter-section">
             <h2 className="section-title">

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { createRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { comicDetailRoute } from "./comic-detail";
-import { sourceManwapi } from "../lib/sources/manwapi";
+import { getManwapiImageApiUrl, sourceManwapi } from "../lib/sources/manwapi";
 import type { ChapterMetadata } from "../lib/cache-types";
 
 export const comicReaderRoute = createRoute({
@@ -53,16 +53,6 @@ async function getChapterList(sourceId: string, bookId: string): Promise<Chapter
   return cached.chapters;
 }
 
-function getImageApiUrl(chapterId: string): string {
-  const imageSource = "https://tu.mwzu.cc";
-  const params = new URLSearchParams({
-    page: "1",
-    page_size: "200",
-    image_source: imageSource,
-  });
-  return `${sourceManwapi.domain}/api/comic/image/${chapterId}?${params}`;
-}
-
 async function getChapter(
   sourceId: string,
   bookId: string,
@@ -72,7 +62,7 @@ async function getChapter(
   const cached = await readCache<ChapterMetadata>(cacheUrl);
   if (cached?.content) return cached;
 
-  const jsonText = await fetchText(getImageApiUrl(chapter.chapterId));
+  const jsonText = await fetchText(getManwapiImageApiUrl(chapter.chapterId));
   const extracted = sourceManwapi.extractors.extractContent(jsonText);
   if (!extracted?.content) throw new Error("漫画图片解析失败");
 
@@ -93,6 +83,17 @@ function getImageUrls(content: string | undefined): string[] {
 
 function getProxiedImageUrl(url: string): string {
   return `/api/proxy-image?url=${encodeURIComponent(url)}`;
+}
+
+function getCachedImageUrl(sourceId: string, bookId: string, chapterId: string, filename: string): string {
+  return `/api/cache/comic/${sourceId}/${bookId}/chapter/${chapterId}/image/${encodeURIComponent(filename)}`;
+}
+
+async function getCachedImageFilenames(sourceId: string, bookId: string, chapterId: string): Promise<string[]> {
+  const res = await fetch(`/api/cache/comic/${sourceId}/${bookId}/chapter/${chapterId}/images`);
+  const result = (await res.json()) as ApiResult<string[]>;
+  if (!result.success) throw new Error(result.error || "图片缓存读取失败");
+  return result.data ?? [];
 }
 
 const MANWAPI_AES_KEY = "0B6666A0-BB59-1381-B746-a0E4C9AC";
@@ -184,6 +185,17 @@ function ComicImage({ url, alt, eager }: { url: string; alt: string; eager: bool
   );
 }
 
+function CachedComicImage({ src, alt, eager }: { src: string; alt: string; eager: boolean }) {
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className="comic-strip-img"
+      loading={eager ? "eager" : "lazy"}
+    />
+  );
+}
+
 function ComicReaderPage() {
   const { sourceId, bookId, chapterId } = comicReaderRoute.useParams();
   const queryClient = useQueryClient();
@@ -205,6 +217,13 @@ function ComicReaderPage() {
     staleTime: 60_000,
   });
 
+  const cachedImagesQuery = useQuery({
+    queryKey: ["comic", sourceId, bookId, "chapter", chapterId, "images"],
+    queryFn: () => getCachedImageFilenames(sourceId, bookId, chapterId),
+    enabled: !!chapterMeta,
+    staleTime: 60_000,
+  });
+
   const refreshMutation = useMutation({
     mutationFn: async () => {
       if (!chapterMeta) return;
@@ -220,6 +239,8 @@ function ComicReaderPage() {
 
   const chapter = chapterQuery.data;
   const imageUrls = getImageUrls(chapter?.content);
+  const cachedImages = cachedImagesQuery.data ?? [];
+  const shouldUseCachedImages = cachedImages.length > 0;
   const hasPrev = currentIndex > 0;
   const hasNext = currentIndex >= 0 && currentIndex < chapters.length - 1;
   const error = chapterListQuery.error || chapterQuery.error || refreshMutation.error;
@@ -251,16 +272,25 @@ function ComicReaderPage() {
         <div className="empty-state">图片加载中...</div>
       )}
 
-      {imageUrls.length > 0 && (
+      {(shouldUseCachedImages || imageUrls.length > 0) && (
         <div className="comic-strip">
-          {imageUrls.map((url, index) => (
-            <ComicImage
-              key={url}
-              url={url}
-              alt={`${chapter?.chapterName || "漫画"} 第${index + 1}页`}
-              eager={index < 2}
-            />
-          ))}
+          {shouldUseCachedImages
+            ? cachedImages.map((filename, index) => (
+                <CachedComicImage
+                  key={filename}
+                  src={getCachedImageUrl(sourceId, bookId, chapterId, filename)}
+                  alt={`${chapter?.chapterName || "漫画"} 第${index + 1}页`}
+                  eager={index < 2}
+                />
+              ))
+            : imageUrls.map((url, index) => (
+                <ComicImage
+                  key={url}
+                  url={url}
+                  alt={`${chapter?.chapterName || "漫画"} 第${index + 1}页`}
+                  eager={index < 2}
+                />
+              ))}
         </div>
       )}
 

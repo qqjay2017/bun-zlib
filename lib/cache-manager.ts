@@ -22,6 +22,16 @@ export function getChaptersCacheDir(contentType: ContentType, sourceId: string, 
   return path.join(getBookCacheDir(contentType, sourceId, bookId), 'chapters');
 }
 
+/** 获取漫画章节图片缓存目录 */
+export function getChapterImagesCacheDir(
+  contentType: ContentType,
+  sourceId: string,
+  bookId: string,
+  chapterId: string,
+): string {
+  return path.join(getBookCacheDir(contentType, sourceId, bookId), 'images', chapterId);
+}
+
 // ============================================================
 // 元数据操作
 // ============================================================
@@ -136,6 +146,62 @@ export async function loadChapter(
     return JSON.parse(text) as ChapterMetadata;
   } catch {
     return null;
+  }
+}
+
+export interface CachedImageFile {
+  filename: string;
+  path: string;
+}
+
+export async function saveChapterImage(
+  contentType: ContentType,
+  sourceId: string,
+  bookId: string,
+  chapterId: string,
+  filename: string,
+  bytes: Uint8Array,
+): Promise<string> {
+  const dir = getChapterImagesCacheDir(contentType, sourceId, bookId, chapterId);
+  await mkdir(dir, { recursive: true });
+  const safeName = path.basename(filename);
+  const filePath = path.join(dir, safeName);
+  await Bun.write(filePath, bytes);
+  return filePath;
+}
+
+export async function loadChapterImage(
+  contentType: ContentType,
+  sourceId: string,
+  bookId: string,
+  chapterId: string,
+  filename: string,
+): Promise<Uint8Array | null> {
+  try {
+    const safeName = path.basename(filename);
+    if (safeName !== filename) return null;
+    const filePath = path.join(getChapterImagesCacheDir(contentType, sourceId, bookId, chapterId), safeName);
+    return new Uint8Array(await Bun.file(filePath).arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
+export async function listChapterImages(
+  contentType: ContentType,
+  sourceId: string,
+  bookId: string,
+  chapterId: string,
+): Promise<CachedImageFile[]> {
+  try {
+    const dir = getChapterImagesCacheDir(contentType, sourceId, bookId, chapterId);
+    const entries = await readdir(dir);
+    return entries
+      .filter((filename) => /^\d+\.(?:jpg|jpeg|png|webp|gif)$/i.test(filename))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+      .map((filename) => ({ filename, path: path.join(dir, filename) }));
+  } catch {
+    return [];
   }
 }
 
